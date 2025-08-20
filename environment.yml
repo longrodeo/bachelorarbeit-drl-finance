@@ -1,0 +1,16 @@
+name: finrl
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10.18
+  - numpy>=2.0,<2.2
+  - pandas=2.3.1
+  - pyarrow>=16,<18
+  - scipy
+  - scikit-learn
+  - matplotlib
+  - pytest
+  - pip
+  - pip:
+      - yfinance
+      - vectorbt

@@ -1,0 +1,9 @@
+pandas
+numpy
+pyyaml
+pyarrow          # Parquet-Unterstützung
+yfinance         # Daten-Downloader
+exchange_calendars
+pandas-market-calendars
+loguru           # Logging
+pytest
