@@ -1,0 +1,37 @@
+source: tiingo          # Primärquelle (tiingo)
+interval: 1d            # Daily bars
+
+bar_type: time          # (später: dollar/volume/imbalance)
+prefer_intraday: false  # Intraday später anschließbar
+exec_price: open_next   # Referenzpreis für T+1-Ausführung (alternativ: vwap_next)
+
+return_type: log        # für return_raw (log oder linear)
+
+fields:                 # Rohfelder, die wir aus der API holen
+  - open
+  - high
+  - low
+  - close
+  - adj_close
+  - volume
+  - dividends
+  - stock_splits
+
+windows:                # Roll-Fenster für abgeleitete Größen
+  adv: 20               # Average Dollar Volume (Close*Volume, 20d)
+  sigma_hl: 20          # Parkinson-Vol-Fenster (HL-basiert)
+  spread_cs: 2          # Corwin–Schultz nutzt 1- & 2-Tages-High/Low
+
+align:
+  calendar: XNYS
+  resample_crypto_to_calendar: true
+  ffill_crypto: true
+
+store:
+  adjusted: false       # wir speichern RAW; TR/Adj. berechnen wir selbst
+  index_layout: "multiindex_date_asset"   # Output: Index=(date, asset), Spalten=Felder
+  out_dir: "data/raw"   # Basisordner für Parquet
+
+meta_defaults:
+  currency: "USD"       # Platzhalter/Default (pro Asset später überschreibbar)
+  tz: "America/New_York"

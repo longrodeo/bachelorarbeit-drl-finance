@@ -1,0 +1,26 @@
+Traceback (most recent call last):
+  File "C:\Users\Dr. LongRodeo\Miniconda3\envs\finrl\lib\runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "C:\Users\Dr. LongRodeo\Miniconda3\envs\finrl\lib\runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "C:\Dev\Bachelorarbeit\src\data\loader.py", line 351, in <module>
+    main()
+  File "C:\Dev\Bachelorarbeit\src\data\loader.py", line 341, in main
+    save_panel(df, cfg)
+  File "C:\Dev\Bachelorarbeit\src\data\loader.py", line 299, in save_panel
+    save_parquet(out_dir / "panel.parquet")
+TypeError: save_parquet() missing 1 required positional argument: 'path'
+Assets aus der Config: ['SPY', 'IEFA', 'IEMG', 'IAU', 'BTC-USD', 'ETH-USD']
+Traceback (most recent call last):
+  File "C:\Users\Dr. LongRodeo\Miniconda3\envs\finrl\lib\runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "C:\Users\Dr. LongRodeo\Miniconda3\envs\finrl\lib\runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "C:\Dev\Bachelorarbeit\src\data\loader.py", line 351, in <module>
+    main()
+  File "C:\Dev\Bachelorarbeit\src\data\loader.py", line 341, in main
+    save_panel(df, cfg)
+  File "C:\Dev\Bachelorarbeit\src\data\loader.py", line 299, in save_panel
+    save_parquet(out_dir / "panel.parquet")
+TypeError: save_parquet() missing 1 required positional argument: 'path'
+Assets aus der Config: ['SPY', 'IEFA', 'IEMG', 'IAU', 'BTC-USD', 'ETH-USD']

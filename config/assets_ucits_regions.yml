@@ -1,0 +1,8 @@
+name: ucits_regions
+start: "2015-01-01"
+end:   "2025-01-01"
+out_dir: "data/raw"
+adj_close: true
+
+equities: [SPY, IEUR, EWJ, IEMG, IAU]   # IEUR = Europa, EWJ = Japan, IEMG = Emerging Markets, IAU = Gold
+crypto:   [BTC-USD, ETH-USD]

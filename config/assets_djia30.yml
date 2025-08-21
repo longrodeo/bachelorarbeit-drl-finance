@@ -1,0 +1,11 @@
+name: djia30
+start: "2010-01-01"
+end:   "2025-01-01"
+out_dir: "data/raw"
+adj_close: true
+
+equities:
+  [AAPL, AMGN, AXP, BA, CAT, CRM, CSCO, CVX, DIS, DOW,
+   GS, HD, HON, IBM, INTC, JNJ, JPM, KO, MCD, MMM,
+   MRK, MSFT, NKE, PG, TRV, UNH, V, VZ, WBA, WMT]
+crypto: [BTC-USD, ETH-USD]
