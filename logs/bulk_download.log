@@ -24,3 +24,47 @@ Traceback (most recent call last):
     save_parquet(out_dir / "panel.parquet")
 TypeError: save_parquet() missing 1 required positional argument: 'path'
 Assets aus der Config: ['SPY', 'IEFA', 'IEMG', 'IAU', 'BTC-USD', 'ETH-USD']
+Traceback (most recent call last):
+  File "C:\Users\Dr. LongRodeo\Miniconda3\envs\finrl\lib\runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "C:\Users\Dr. LongRodeo\Miniconda3\envs\finrl\lib\runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "C:\Dev\Bachelorarbeit\src\data\loader.py", line 351, in <module>
+    main()
+  File "C:\Dev\Bachelorarbeit\src\data\loader.py", line 341, in main
+    save_panel(df, cfg)
+  File "C:\Dev\Bachelorarbeit\src\data\loader.py", line 299, in save_panel
+    save_parquet(out_dir / "panel.parquet")
+TypeError: save_parquet() missing 1 required positional argument: 'path'
+Assets aus der Config: ['SPY', 'IEFA', 'IEMG', 'IAU', 'BTC-USD', 'ETH-USD']
+Traceback (most recent call last):
+  File "C:\Users\Dr. LongRodeo\Miniconda3\envs\finrl\lib\runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "C:\Users\Dr. LongRodeo\Miniconda3\envs\finrl\lib\runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "C:\Dev\Bachelorarbeit\src\data\loader.py", line 351, in <module>
+    main()
+  File "C:\Dev\Bachelorarbeit\src\data\loader.py", line 341, in main
+    save_panel(df, cfg)
+  File "C:\Dev\Bachelorarbeit\src\data\loader.py", line 299, in save_panel
+    save_parquet(out_dir / "panel.parquet")
+TypeError: save_parquet() missing 1 required positional argument: 'path'
+Assets aus der Config: ['SPY', 'BTC-USD']
+Traceback (most recent call last):
+  File "C:\Users\Dr. LongRodeo\Miniconda3\envs\finrl\lib\runpy.py", line 187, in _run_module_as_main
+    mod_name, mod_spec, code = _get_module_details(mod_name, _Error)
+  File "C:\Users\Dr. LongRodeo\Miniconda3\envs\finrl\lib\runpy.py", line 157, in _get_module_details
+    code = loader.get_code(mod_name)
+  File "<frozen importlib._bootstrap_external>", line 1017, in get_code
+  File "<frozen importlib._bootstrap_external>", line 947, in source_to_code
+  File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
+  File "C:\Dev\Bachelorarbeit\src\data\loader.py", line 294
+    dimport json, datetime
+            ^^^^
+SyntaxError: invalid syntax
+Assets aus der Config: ['SPY', 'IEFA', 'IEMG', 'IAU', 'BTC-USD', 'ETH-USD']
+[OK] Panel + Manifest gespeichert unter data\raw\ucits_compact
+Panel geladen: (15096, 14)
+Spalten: ['open', 'high', 'low', 'close', 'adj_close', 'volume', 'dividends', 'stock_splits', 'return_raw', 'adv', 'sigma_hl', 'sigma_cs', 'spread_cs', 'exec_ref_tplus1']
+CLI OK ù Config: config\assets_ucits_compact.yml
+CLI OK ù DataSpec: config\data_spec.yml

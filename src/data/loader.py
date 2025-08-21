@@ -6,10 +6,15 @@ import time
 from pathlib import Path
 from typing import Iterable
 import os, requests
-
+import json, datetime
 import numpy as np
 import pandas as pd
 import yaml
+
+from src.features.core import returns, adv as adv_fn, parkinson_sigma
+from src.features.microstructure import (
+    cs_beta, cs_gamma, cs_alpha, cs_sigma, cs_spread_from_alpha
+)
 
 from src.utils.parquet_io import save_parquet, load_parquet
 # Optionaler NYSE-Kalender (sauberer als BusinessDays)
@@ -36,64 +41,6 @@ def _norm_cols(cols: Iterable) -> list[str]:
             c = c[0]
         out.append(str(c).lower().replace(" ", "_"))
     return out
-
-
-# --------------------- Corwin–Schultz (López) --------------------
-
-def _cs_beta(high: pd.Series, low: pd.Series, sl: int = 1) -> pd.Series:
-    """
-    getBeta aus Snippet 19.1:
-    hl_t = [ln(High/Low)]^2
-    beta_t = hl_t + hl_{t-1} (rolling_sum window=2), danach optional rolling_mean 'sl'
-    """
-    hl = np.log(high / low) ** 2
-    beta = hl.rolling(window=2).sum()
-    if sl and sl > 1:
-        beta = beta.rolling(window=sl).mean()
-    return beta
-
-
-def _cs_gamma(high: pd.Series, low: pd.Series) -> pd.Series:
-    """getGamma aus Snippet 19.1: ln( max(H_t,H_{t-1}) / min(L_t,L_{t-1}) )^2"""
-    h2 = high.rolling(window=2).max()
-    l2 = low.rolling(window=2).min()
-    gamma = np.log(h2 / l2) ** 2
-    return gamma
-
-
-def _cs_alpha(beta: pd.Series, gamma: pd.Series) -> pd.Series:
-    """
-    getAlpha aus Snippet 19.1:
-    den = 3 - 2*sqrt(2)
-    alpha = ((sqrt(2)-1)/den)*sqrt(beta) - sqrt(gamma/den)
-    negatives -> 0
-    """
-    den = 3.0 - 2.0 * np.sqrt(2.0)
-    term1 = ((np.sqrt(2.0) - 1.0) / den) * np.sqrt(beta)
-    term2 = np.sqrt(gamma / den)
-    alpha = (term1 - term2).clip(lower=0.0)
-    return alpha
-
-
-def _cs_sigma(beta: pd.Series, gamma: pd.Series) -> pd.Series:
-    """
-    getSigma aus Snippet 19.1:
-    k2=(8/pi)^0.5 ; den=3-2*sqrt(2)
-    sigma=(2^-0.5 - 1)*sqrt(beta)/(k2*den) + sqrt(gamma/(k2^2*den))
-    negatives -> 0
-    """
-    k2 = np.sqrt(8.0 / np.pi)
-    den = 3.0 - 2.0 * np.sqrt(2.0)
-    term1 = (2.0 ** -0.5 - 1.0) * (np.sqrt(beta) / (k2 * den))
-    term2 = np.sqrt(gamma / (k2 ** 2 * den))
-    sigma = (term1 + term2).clip(lower=0.0)
-    return sigma
-
-
-def _cs_spread_from_alpha(alpha: pd.Series) -> pd.Series:
-    """Spread-Formel aus Snippet 19.1: S = 2*(e^α - 1)/(1 + e^α)"""
-    ealpha = np.exp(alpha)
-    return 2.0 * (ealpha - 1.0) / (1.0 + ealpha)
 
 
 # --------------------------- Loader ------------------------------
@@ -229,45 +176,30 @@ def align_to_nyse(df: pd.DataFrame, start: str, end: str,
 
 
 def add_derived_features(df: pd.DataFrame, spec: dict) -> pd.DataFrame:
-    """
-    Fügt pro Asset an:
-      - return_raw (log/linear)
-      - adv (Average Dollar Volume, rolling)
-      - sigma_hl (Parkinson, rolling)
-      - sigma_cs (Corwin–Schultz, Snippet 19.1)
-      - spread_cs (aus Alpha gemäß Snippet 19.1)
-      - exec_ref_tplus1 (Open_{t+1})
-    """
     win_adv = int(spec["windows"]["adv"])
     win_sigma_hl = int(spec["windows"]["sigma_hl"])
     sl_cs = int(spec["windows"].get("spread_cs", 1))
     rtype = spec.get("return_type", "log")
 
     out_frames: list[pd.DataFrame] = []
-    for asset, df_a in df.groupby(level="asset"):
-        x = df_a.droplevel("asset").copy()
+    for asset, x in df.groupby(level="asset"):
+        x = x.droplevel("asset").copy()
 
-        # return_raw
-        if rtype == "log":
-            x["return_raw"] = np.log(x["close"] / x["close"].shift(1))
-        else:
-            x["return_raw"] = x["close"].pct_change()
+        # Returns & ADV
+        x["return_raw"] = returns(x["close"], kind=rtype)
+        x["adv"]        = adv_fn(x["close"], x["volume"], win_adv)
 
-        # ADV
-        x["adv"] = (x["close"] * x["volume"]).rolling(win_adv).mean()
+        # Parkinson
+        x["sigma_hl"]   = parkinson_sigma(x["high"], x["low"], win_sigma_hl)
 
-        # Parkinson sigma (HL-basiert)
-        hl_var = (np.log(x["high"] / x["low"])) ** 2
-        x["sigma_hl"] = (hl_var / (4.0 * np.log(2.0))).rolling(win_sigma_hl).mean()
+        # Corwin–Schultz
+        beta  = cs_beta(x["high"], x["low"], sl=sl_cs)
+        gamma = cs_gamma(x["high"], x["low"])
+        alpha = cs_alpha(beta, gamma)
+        x["sigma_cs"]   = cs_sigma(beta, gamma)
+        x["spread_cs"]  = cs_spread_from_alpha(alpha)
 
-        # Corwin–Schultz: beta, gamma, alpha, sigma_cs, spread_cs
-        beta = _cs_beta(x["high"], x["low"], sl=sl_cs)
-        gamma = _cs_gamma(x["high"], x["low"])
-        alpha = _cs_alpha(beta, gamma)
-        x["sigma_cs"] = _cs_sigma(beta, gamma)
-        x["spread_cs"] = _cs_spread_from_alpha(alpha)
-
-        # Exec-Referenz für T+1
+        # Exec-Referenz (T+1)
         x["exec_ref_tplus1"] = x["open"].shift(-1)
 
         x["asset"] = asset
@@ -276,6 +208,7 @@ def add_derived_features(df: pd.DataFrame, spec: dict) -> pd.DataFrame:
     df_all = pd.concat(out_frames).sort_index()
     df_all = df_all[~df_all.index.duplicated(keep="last")]
     return df_all
+
 
 
 def _assert_no_dupes(idx: pd.Index) -> None:
@@ -294,17 +227,26 @@ def _assert_non_negative_prices(df: pd.DataFrame) -> None:
 def save_panel(df: pd.DataFrame, cfg: dict) -> Path:
     out_dir = Path(cfg.get("out_dir", "data/raw")) / cfg["name"]
     out_dir.mkdir(parents=True, exist_ok=True)
+
     # Panel komplett
-    (out_dir / "panel.parquet").unlink(missing_ok=True)
-    save_parquet(out_dir / "panel.parquet")
+    save_parquet(df, out_dir / "panel.parquet")
+
     # Einzel-Assets
     for asset in df.index.get_level_values("asset").unique():
-        df_asset = df.xs(asset, level="asset")
-        (out_dir / f"{asset}.parquet").unlink(missing_ok=True)
-        save_parquet(out_dir / f"{asset}.parquet")
-    print(f"[OK] Panel gespeichert unter {out_dir}")
-    return out_dir
+        save_parquet(df.xs(asset, level="asset"), out_dir / f"{asset}.parquet")
 
+    # Manifest schreiben
+    manifest = {
+        "name": cfg["name"],
+        "assets": list(df.index.get_level_values("asset").unique()),
+        "shape": df.shape,
+        "columns": list(df.columns),
+        "created": datetime.datetime.now().isoformat()
+    }
+    (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
+
+    print(f"[OK] Panel + Manifest gespeichert unter {out_dir}")
+    return out_dir
 
 # --------------------------- CLI -------------------------------
 
