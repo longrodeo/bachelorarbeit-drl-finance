@@ -17,21 +17,34 @@ fields:                 # Rohfelder, die wir aus der API holen
   - dividends
   - stock_splits
 
-windows:                # Roll-Fenster für abgeleitete Größen
-  adv: 20               # Average Dollar Volume (Close*Volume, 20d)
-  sigma_hl: 20          # Parkinson-Vol-Fenster (HL-basiert)
-  spread_cs: 2          # Corwin–Schultz nutzt 1- & 2-Tages-High/Low
+paths:
+  raw_dir: data/raw
+  interim_dir: data/interim
+  clean_dir: data/clean
 
 align:
   calendar: XNYS
-  resample_crypto_to_calendar: true
-  ffill_crypto: true
+  ffill_crypto: false
 
-store:
-  adjusted: false       # wir speichern RAW; TR/Adj. berechnen wir selbst
-  index_layout: "multiindex_date_asset"   # Output: Index=(date, asset), Spalten=Felder
-  out_dir: "data/raw"   # Basisordner für Parquet
+windows:
+  adv: 20
+  sma: [20, 60]
+  ema: [12, 26]
+  rsi: 14
+  macd: [12, 26, 9]
+  boll: [20, 2.0]
+  cci: 20
+  adx: 14
 
-meta_defaults:
-  currency: "USD"       # Platzhalter/Default (pro Asset später überschreibbar)
-  tz: "America/New_York"
+cs:
+  sample_length: 1
+
+risk_free:
+  series_id: DFF
+  day_count: 360
+
+cash:
+  symbol: CASH
+
+feature_version: v1
+

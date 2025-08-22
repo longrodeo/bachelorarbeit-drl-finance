@@ -1,0 +1,16 @@
+fees:
+  max_commission_bps: 25.0      # parametrisierte Kommission (bps), default klein
+  min_commission_bps: 1.0         # optional
+
+spread:
+  mode: "cs"               # "cs" | "fixed"
+  fixed_bps: 25.0           # nur falls mode=fixed
+  use_half_on_each_side: true
+
+vol_slippage:
+  k_bps_per_sigma: 0.0     # 0 = aus (empfohlen, solange wir Open T+1 handeln)
+
+impact:
+  k_bps: 0.0               # 0 = aus
+  exponent: 1.0
+  use_adv: true

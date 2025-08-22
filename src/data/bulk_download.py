@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 import pandas as pd
 
-from src.data.loader import load_prices, align_to_nyse, add_derived_features, save_panel
+from src.data.load_raw import load_prices, align_to_nyse, add_derived_features, save_panel
 
 
 def bulk_download(config_path: str | Path, spec_path: str | Path,

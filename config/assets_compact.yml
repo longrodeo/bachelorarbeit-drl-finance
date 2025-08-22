@@ -1,0 +1,8 @@
+name: compact
+start: "2015-01-01"
+end:   "2025-01-01"
+out_dir: "data/raw"
+adj_close: true
+
+equities: ["SPY", "IEFA", "IEMG", "IAU"]   # IEFA = Developed ex-US (ohne Kanada), IEMG = Emerging Markets, IAU = Gold
+crypto:   ["BTC-USD", "ETH-USD"]

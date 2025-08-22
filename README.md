@@ -68,7 +68,7 @@ crypto:   ["BTC-USD"]
 ```
 
 ```yaml
-# config/assets_ucits_compact.yml
+# config/assets_compact.yml
 name: ucits_compact
 start: 2018-01-01
 end: 2024-12-31
@@ -123,13 +123,13 @@ python -m src.utils.validator --config config/assets_example.yml --spec config/d
 
 ```bash
 # TIINGO_API_KEY muss als Umgebungsvariable gesetzt sein
-python -m src.data.loader --config config/assets_ucits_compact.yml --spec config/data_spec.yml
+python -m src.data.loader --config config/assets_compact.yml --spec config/data_spec.yml
 ```
 
 **Optionales Logging:**
 ```bash
 mkdir -p logs
-python -m src.data.loader --config config/assets_ucits_compact.yml --spec config/data_spec.yml >> logs/bulk_download.log 2>&1
+python -m src.data.loader --config config/assets_compact.yml --spec config/data_spec.yml >> logs/bulk_download.log 2>&1
 ```
 
 **Ergebnis prüfen (Quick-Check):**
