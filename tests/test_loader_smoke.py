@@ -9,7 +9,7 @@ from src.data.load_raw import download_raw_prices
 from src.data.build_interim import build_interim_prices
 from src.data.build_clean import build_clean_data
 
-ASSETS_CFG = Path("config/assets_example.yml")
+ASSETS_CFG = Path("config/assets_regions.yml")
 DATA_CFG   = Path("config/data_spec.yml")
 
 needs_cfg = pytest.mark.skipif(
@@ -31,19 +31,18 @@ def test_pipeline_raw_interim_clean_runs():
     cfg  = yaml.safe_load(open(ASSETS_CFG, "r", encoding="utf-8"))
     spec = yaml.safe_load(open(DATA_CFG, "r", encoding="utf-8"))
     assets = cfg["equities"] + cfg.get("crypto", [])
+    start = spec["window"]["start"]
+    end = spec["window"]["end"]
 
     # RAW
-    download_raw_prices(assets, cfg["start"], cfg["end"], out_dir="data/raw")
+    download_raw_prices(assets, start, end)
 
     # INTERIM
     df_interim = build_interim_prices(
-        asset_list=assets,
-        start=cfg["start"],
-        end=cfg["end"],
-        spec=spec,
-        raw_dir="data/raw",
-        out_path="data/interim/prices.parquet",
-        crypto_assets=set(cfg.get("crypto", [])),
+    assets, start, end,
+    spec = spec,
+    crypto_assets = set(cfg.get("crypto", [])),
+    save = False,
     )
     assert not df_interim.empty
     assert df_interim.index.names == ["date", "asset"]

@@ -3,7 +3,14 @@ interval: 1d            # Daily bars
 
 bar_type: time          # (später: dollar/volume/imbalance)
 prefer_intraday: false  # Intraday später anschließbar
-exec_price: open_next   # Referenzpreis für T+1-Ausführung (alternativ: vwap_next)
+exec_price: open_next # Referenzpreis für T+1-Ausführung (alternativ: vwap_next)
+
+assets:
+  file: config/assets_regions.yml
+
+window:
+  start: "2015-01-01"
+  end: "2025-01-01"
 
 return_type: log        # für return_raw (log oder linear)
 

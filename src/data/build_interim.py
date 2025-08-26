@@ -1,126 +1,117 @@
+# src/data/build_interim.py
 from __future__ import annotations
-from pathlib import Path
-import platform
+from typing import Optional, Sequence, Set, Dict
+
 import pandas as pd
 
 from src.data.calendar import nyse_trading_days
 from src.data.align import align_to_trading_days, resample_crypto_last
+from src.utils.paths import INTERIM_PANEL
 from src.utils.parquet_io import load_parquet, save_parquet
-from utils.manifest import write_manifest, file_summary, current_commit_short  # :contentReference[oaicite:1]{index=1}
 
-__all__ = ["build_interim_prices", "write_interim_manifest"]
+# Mapping Provider → kanonisch (nur in INTERIM anwenden)
+PROVIDER_TO_CANONICAL = {
+    "adjclose": "adj_close",
+    "divcash": "dividends",
+    "splitfactor": "stock_splits",
+}
 
+DEFAULT_SPEC: Dict[str, object] = {
+    "fields": ["open", "high", "low", "close", "adj_close", "volume", "dividends", "stock_splits"],
+    "require_base_fields": True,
+    "base_fields": ["open", "high", "low", "close"],
+    "calendar": "XNYS",
+}
+
+def _sanitize(s: str) -> str:
+    return str(s).strip().replace(" ", "_").replace("-", "_").lower()
+
+def _standardize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df.rename(columns={c: PROVIDER_TO_CANONICAL.get(_sanitize(c), _sanitize(c)) for c in df.columns}, inplace=True)
+    return df
+
+def _to_datetime_index(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    if "date" in df.columns:
+        dt = pd.to_datetime(df["date"], errors="coerce", utc=True).dt.tz_localize(None)
+        df = df.drop(columns=["date"])
+        df.index = dt
+        df.index.name = "date"
+    return df
 
 def build_interim_prices(
-    asset_list: list[str],
+    assets: Sequence[str],
     start: str,
     end: str,
-    spec: dict,
-    raw_dir: str | Path = "data/raw",
-    out_path: str | Path = "data/interim/panel.parquet",
-    crypto_assets: set[str] | None = None,
+    spec: Optional[dict] = None,
+    crypto_assets: Optional[Set[str]] = None,
+    sessions: Optional[pd.DatetimeIndex] = None,
+    save: bool = True,
 ) -> pd.DataFrame:
-    """
-    Nimmt RAW-Dateien, wählt Felder (spec['fields']), normalisiert Spaltennamen (snake_case),
-    richtet auf NYSE aus und schreibt EIN kombiniertes Parquet (MultiIndex: date, asset) nach data/interim/.
-    - Fehlende optionale Felder werden sinnvoll ergänzt (dividends=0.0, stock_splits=1.0, adj_close=close, volume=0.0).
-    - Keine Fills in INTERIM (Lücken bleiben sichtbar). Krypto-Downsampling via resample_crypto_last.
-    """
-    crypto_assets = crypto_assets or set()
-    fields: list[str] = list(spec.get("fields", []))
-    if not fields:
-        raise ValueError("spec['fields'] muss eine Liste gültiger Feldnamen enthalten.")
+    """Aus RAW-Parquets ein Panel (MultiIndex: date, asset) bauen."""
+    cfg = dict(DEFAULT_SPEC)
+    cal_idx = nyse_trading_days(start, end, tz="UTC")  # tz-aware Index (UTC)
+    if spec:
+        cfg.update(spec)
 
-    cal_idx = nyse_trading_days(start, end)  # Master-Kalender
-    frames: list[pd.DataFrame] = []
-    rawp = Path(raw_dir)
+    fields = list(cfg.get("fields", []))
+    require_base = bool(cfg.get("require_base_fields", True))
+    base_fields = set(cfg.get("base_fields", ["open", "high", "low", "close"]))
+    crypto_assets = {a.upper() for a in (crypto_assets or set())}
 
-    for asset in asset_list:
-        f = rawp / f"{asset}.parquet"
+    frames = []
+    for asset in assets:
+        from utils.paths import raw_asset_path  # lazy import, vermeidet Zyklen
+        f = raw_asset_path(asset)
         if not f.exists():
-            print(f"[WARN] RAW fehlt: {f}")
-            continue
+            raise FileNotFoundError(f"RAW file not found: {f}.")
+        raw = load_parquet(f)  # RAW unverändert (date ist Spalte)
 
-        raw = load_parquet(f)
+        # Fenster schneiden (tz-naiv)
+        if "date" in raw.columns:
+            date = pd.to_datetime(raw["date"], errors="coerce", utc=True).dt.tz_localize(None)
+            start_date = pd.to_datetime(start); end_date = pd.to_datetime(end)
+            raw = raw.loc[(date >= start_date) & (date <= end_date)]
 
-        # Sicherstellen: DatetimeIndex, Name 'date'
-        if not isinstance(raw.index, pd.DatetimeIndex):
-            if "date" in raw.columns:
-                raw = raw.set_index("date")
-        raw.index = pd.to_datetime(raw.index)
-        raw.index.name = "date"
+        # Normalisieren
+        df = _standardize_columns(raw)
+        df = _to_datetime_index(df)
 
-        # Feldauswahl (nur vorhandene)
-        keep = [c for c in fields if c in raw.columns]
-        df = raw[keep].copy()
+        # Feldauswahl
+        keep = [c for c in fields if c in df.columns]
+        df = df[keep].copy()
 
-        # --- Harte Prüfung: unerlässliche Preisspalten müssen vorhanden sein
-        required_price = {"open", "high", "low", "close"}
-        missing_req = [c for c in required_price if c not in df.columns]
-        if missing_req:
-            raise ValueError(f"[{asset}] Fehlende Preisspalten: {missing_req} in RAW {f}")
+        # Basisspalten-Policy
+        if require_base:
+            missing = [c for c in base_fields if c not in df.columns]
+            if missing:
+                raise ValueError(f"[{asset}] Missing base fields after mapping: {missing}")
 
-        # --- Fehlende optionale Felder sinnvoll ergänzen
-        if "adj_close" not in df.columns:
+        # sinnvolle Defaults nur falls in fields verlangt
+        if "adj_close" in fields and "adj_close" not in df.columns and "close" in df.columns:
             df["adj_close"] = df["close"]
-        if "dividends" not in df.columns:
+        if "dividends" in fields and "dividends" not in df.columns:
             df["dividends"] = 0.0
-        if "stock_splits" not in df.columns:
+        if "stock_splits" in fields and "stock_splits" not in df.columns:
             df["stock_splits"] = 1.0
-        if "volume" not in df.columns:
+        if "volume" in fields and "volume" not in df.columns:
             df["volume"] = 0.0
 
-        # snake_case
-        df.columns = [c.replace(" ", "_").replace("-", "_").lower() for c in df.columns]
-
-        # Alignment
-        if asset in crypto_assets:
-            df_aligned = resample_crypto_last(df, cal_idx)
+        # Align/Downsample
+        is_crypto = (asset.upper() in crypto_assets) or asset.upper().endswith("USD")
+        if is_crypto:
+            df = resample_crypto_last(df, cal_idx)  # 7-Tage-Krypto → Handelstage (last)
         else:
-            df_aligned = align_to_trading_days(df, cal_idx)
+            df = align_to_trading_days(df, cal_idx)  # Equities hart auf Handelstage
 
-        # MultiIndex aufbauen
-        df_aligned["asset"] = asset
-        df_aligned = df_aligned.reset_index().set_index(["date", "asset"])
-        frames.append(df_aligned)
+        df["asset"] = asset
+        frames.append(df)
 
-    if not frames:
-        raise RuntimeError("Keine INTERIM-Frames erzeugt (RAW leer/fehlend?).")
+    out = pd.concat(frames, axis=0)
+    out = out.set_index("asset", append=True).sort_index()
+    out.index.set_names(["date", "asset"], inplace=True)
 
-    out = pd.concat(frames).sort_index()
-    out = out[~out.index.duplicated(keep="last")]
-
-    outp = Path(out_path)
-    outp.parent.mkdir(parents=True, exist_ok=True)
-    save_parquet(out, outp)
-    print(f"[OK] INTERIM gespeichert: {outp} (rows={len(out)})")
+    if save:
+        save_parquet(out, INTERIM_PANEL)
     return out
-
-
-def write_interim_manifest(
-    spec: dict,
-    raw_files: list[str] | list[Path],
-    out_path: str | Path = "data/interim/panel.parquet",
-    manifest_path: str | Path = "data/interim/_manifest.json",
-) -> None:
-    """
-    Schreibt ein Manifest für die INTERIM-Stufe.
-    """
-    payload = {
-        "stage": "interim",
-        "dataset_id": spec.get("interim_dataset_id", "panel_v1"),
-        "created_at": pd.Timestamp.utcnow().isoformat(),
-        "git_commit": current_commit_short(),
-        "calendar": spec.get("align", {}).get("calendar", "XNYS"),
-        "spec": {
-            "fields": spec.get("fields", []),
-            "align": {"ffill_crypto": bool(spec.get("align", {}).get("ffill_crypto", False))}
-        },
-        "inputs": [file_summary(str(p)) for p in raw_files],
-        "outputs": [file_summary(str(out_path))],
-        "env": {
-            "python": platform.python_version(),
-            "pandas": pd.__version__,
-        },
-    }
-    write_manifest(payload, str(manifest_path))  # :contentReference[oaicite:2]{index=2}

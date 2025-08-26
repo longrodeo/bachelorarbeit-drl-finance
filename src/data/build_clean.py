@@ -47,6 +47,7 @@ def _build_cash_asset(
     day_count: int = 360,
     symbol: str = "CASH",
 ) -> pd.DataFrame:
+
     """
     Synthetisches, handelbares CASH-Asset:
       open_t  = close_{t-1} (start=1.0)
@@ -54,7 +55,7 @@ def _build_cash_asset(
       daily_return_log = ln(1 + r_ann_t * Δ_t/day_count)
     """
     rf = risk_free_annual.reindex(dates).ffill()
-    date_series = pd.Series(dates, index=dates)
+    date_series = pd.Series(pd.to_datetime(dates), index=pd.to_datetime(dates))
     days_to_next = (date_series.shift(-1) - date_series).dt.days.fillna(1).astype(int)
 
     factor = 1.0 + rf * (days_to_next / float(day_count))
@@ -206,7 +207,7 @@ def build_clean_data(
         frames.append(features.reset_index().set_index(["date", "asset"]))
 
     # --- CASH Asset ---
-    dates = prices.index.get_level_values("date").unique().sort_values()
+    dates = prices.index.get_level_values(0).unique().sort_values()
     cash_df = _build_cash_asset(dates, risk_free_annual, day_count=360, symbol=cash_symbol)
     frames.append(cash_df)
 

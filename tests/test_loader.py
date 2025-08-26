@@ -8,7 +8,7 @@ from src.utils.parquet_io import save_parquet, load_parquet
 from src.data.load_raw import download_raw_prices
 from src.data.build_interim import build_interim_prices
 
-ASSETS_CFG = Path("config/assets_example.yml")
+ASSETS_CFG = Path("config/assets_regions.yml")
 DATA_CFG   = Path("config/data_spec.yml")
 
 needs_cfg = pytest.mark.skipif(
@@ -28,28 +28,22 @@ def test_smoke_raw_to_interim():
     """RAW → INTERIM läuft durch; INTERIM hat erwarteten Index & Spalten."""
     cfg  = yaml.safe_load(open(ASSETS_CFG, "r", encoding="utf-8"))
     spec = yaml.safe_load(open(DATA_CFG, "r", encoding="utf-8"))
-
     assets = cfg["equities"] + cfg.get("crypto", [])
+    start = spec["window"]["start"]
+    end = spec["window"]["end"]
+
     # 1) RAW
-    written = download_raw_prices(
-        asset_list=assets,
-        start=cfg["start"],
-        end=cfg["end"],
-        out_dir="data/raw",
-        provider="tiingo",
-    )
+    written = download_raw_prices(assets, start, end)
     assert len(written) > 0
 
     # 2) INTERIM
     df = build_interim_prices(
-        asset_list=assets,
-        start=cfg["start"],
-        end=cfg["end"],
-        spec=spec,
-        raw_dir="data/raw",
-        out_path="data/interim/prices.parquet",
-        crypto_assets=set(cfg.get("crypto", [])),
+    assets, start, end,
+    spec = spec,
+    crypto_assets = set(cfg.get("crypto", [])),
+    save = False,
     )
+
     if df.empty:
         pytest.skip("no data returned")
 
@@ -64,16 +58,10 @@ def test_smoke_raw_to_interim():
 
 
 @needs_tiingo
-def test_invalid_asset_raises():
-    """Ungültiges Asset wirft einen (Provider‑)Fehler."""
-    with pytest.raises((ValueError, HTTPError, RuntimeError)):
-        download_raw_prices(
-            asset_list=["FAKE123"],
-            start="2020-01-01",
-            end="2020-01-10",
-            out_dir="data/raw",
-            provider="tiingo",
-        )
+def test_invalid_asset_is_skipped():
+    """Ungültiges Asset wird vom Loader übersprungen (kein Raise, leere Rückgabe)."""
+    written = download_raw_prices(["FAKE123"], "2020-01-01", "2020-01-10")
+    assert written == []
 
 
 @needs_cfg
@@ -83,18 +71,19 @@ def test_parquet_persistence_roundtrip(tmp_path: Path):
     cfg  = yaml.safe_load(open(ASSETS_CFG, "r", encoding="utf-8"))
     spec = yaml.safe_load(open(DATA_CFG, "r", encoding="utf-8"))
     assets = (cfg["equities"] + cfg.get("crypto", []))[:2]  # klein halten
+    start = spec["window"]["start"]
+    end = spec["window"]["end"]
+
 
     # Mini‑Pipeline bis INTERIM
-    download_raw_prices(assets, cfg["start"], cfg["end"], out_dir=tmp_path / "raw")
+    download_raw_prices(assets, start, end)
     df = build_interim_prices(
-        asset_list=assets,
-        start=cfg["start"],
-        end=cfg["end"],
-        spec=spec,
-        raw_dir=tmp_path / "raw",
-        out_path=tmp_path / "interim" / "prices.parquet",
-        crypto_assets=set(cfg.get("crypto", [])),
+    assets, start, end,
+    spec = spec,
+    crypto_assets = set(cfg.get("crypto", [])),
+    save = False,
     )
+
     if df.empty:
         pytest.skip("no data returned")
 

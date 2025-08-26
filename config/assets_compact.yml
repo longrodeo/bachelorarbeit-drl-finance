@@ -1,6 +1,5 @@
 name: compact
-start: "2015-01-01"
-end:   "2025-01-01"
+
 out_dir: "data/raw"
 adj_close: true
 

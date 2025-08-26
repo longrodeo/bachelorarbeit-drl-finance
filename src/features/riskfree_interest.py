@@ -11,10 +11,11 @@ FRED_URL = "https://api.stlouisfed.org/fred/series/observations"
 
 def _resolve_fred_api_key(passed: Optional[str] = None) -> str:
     """
-    Liefert den FRED API Key. Reihenfolge:
+    Liefert den FRED API-Key. Reihenfolge:
     1) explizit übergebener Key (Argument)
     2) Umgebungsvariablen: FRED_API_KEY, FRED_API_TOKEN, FRED_KEY
     """
+    # key = "Platzhalter"
     key = passed or os.environ.get("FRED_API_KEY") or os.environ.get("FRED_API_TOKEN") or os.environ.get("FRED_KEY")
     if not key:
         raise ValueError("FRED API Key fehlt. Setze FRED_API_KEY (oder übergib api_key=...).")
@@ -54,12 +55,14 @@ def fetch_fred_nyse_daily(
     obs["date"]  = pd.to_datetime(obs["date"], utc=True).dt.tz_localize(None)
     s = pd.Series(obs["value"].values, index=obs["date"].values, name=series_id).sort_index()
 
-    # --- NYSE-Handelstage (aus eurem Modul) + Reindex (aus eurem Modul) ---
+    # --- NYSE-Handelstage  + Reindex  ---
     cal_idx = nyse_trading_days(start=s.index.min().date().isoformat(), end=end, tz=tz)   # :contentReference[oaicite:2]{index=2}
     df = align_to_trading_days(s.to_frame(), cal_idx)                                     # :contentReference[oaicite:3]{index=3}
 
-    if fill in ("ffill", "bfill"):
-        df[series_id] = df[series_id].fillna(method=fill)
+    if fill == "ffill":
+        df[series_id] = df[series_id].ffill()
+    elif fill == "bfill":
+        df[series_id] = df[series_id].bfill()
 
     return df[series_id]
 
