@@ -9,7 +9,7 @@ from src.utils.paths import INTERIM_PANEL, RISKFREE_FILE, SPEC, get_window
 # Hilfsfunktion zum Einlesen von Parquet-Dateien
 from src.utils.parquet_io import load_parquet
 # Handelskalender-Funktion für NYSE-Trading-Days
-from src.data.calendar import nyse_trading_days
+from src.data.trading_calendar import nyse_trading_days
 
 # 1) Kalender-Konsistenz: INTERIM == NYSE Sessions
 start, end = get_window()  # Lese den global definierten Auswertungszeitraum aus den Spezifikationen

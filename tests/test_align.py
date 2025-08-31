@@ -16,7 +16,7 @@ pro Handelstag reduziert werden.
 # Import von pandas für tabellarische Zeitreihenstrukturen
 import pandas as pd
 # Handelskalender-Funktion zur Generierung der NYSE-Trading-Days
-from src.data.calendar import nyse_trading_days
+from src.data.trading_calendar import nyse_trading_days
 # Zu testende Funktionen: Reindexing und Resampling für Krypto
 from src.data.align import align_to_trading_days, resample_crypto_last
 

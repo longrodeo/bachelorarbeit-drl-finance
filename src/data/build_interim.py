@@ -19,7 +19,7 @@ from typing import Optional, Sequence, Set, Dict  # Typinformationen für Argume
 
 import pandas as pd  # zentrale Datenstruktur (DataFrame)
 
-from src.data.calendar import nyse_trading_days  # Handelskalender für NYSE-Sessions
+from src.data.trading_calendar import nyse_trading_days  # Handelskalender für NYSE-Sessions
 from src.data.align import align_to_trading_days, resample_crypto_last  # Index-Helfer für Ausrichtung
 from src.utils.paths import INTERIM_PANEL  # Zielpfad für das resultierende Panel
 from src.utils.parquet_io import load_parquet, save_parquet  # Parquet-Ein-/Ausgabe

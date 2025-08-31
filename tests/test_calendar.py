@@ -6,7 +6,7 @@ Index sortiert, UTC-basiert und wochenendfrei ist.
 # pandas liefert Datums-/Zeitindex-Utilities für Assertions
 import pandas as pd
 # zu testende Funktion, erzeugt NYSE-Handelstage
-from src.data.calendar import nyse_trading_days
+from src.data.trading_calendar import nyse_trading_days
 
 def test_nyse_trading_days_basic():
     """Kalender liefert korrekte Eigenschaften für Januar 2024."""

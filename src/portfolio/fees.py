@@ -7,9 +7,6 @@ from typing import Dict, Optional
 def load_costs(costs_path: Path | str) -> Dict:
     return yaml.safe_load(Path(costs_path).read_text(encoding="utf-8"))
 
-def _bps(x: float) -> float:
-    return float(x) / 1e4
-
 def apply_fees(
     trades: pd.DataFrame,
     *,
@@ -22,18 +19,19 @@ def apply_fees(
     Gebühren (bps auf Notional) + optional Vol-Slippage.
     Erwartet trades mit Spalten: ['q','p_ref','p_exec','notional_abs','spread_cost'].
     """
+    # Späteres To Do Spread Berechnung in apply_fees umziehen
     out = trades.copy()
 
     # Kommission
-    fees = out["notional_abs"] * _bps(commission_bps)
+    fees = out["notional_abs"] * commission_bps / 1e4
     out["fees"] = fees
 
     # optionale Vol-Slippage proportional zu sigma_hl
     if use_vol_slippage and sigma_hl is not None:
         vol_bps = float(k_bps_per_sigma) * sigma_hl.reindex(out.index).fillna(0.0)
-        out["vol_slip"] = (out["q"].abs() * out.get("p_ref", 0) * _bps(vol_bps)).astype(float)
+        out["vol_slip"] = (out["q"].abs() * out.get("p_ref", 0) *  (vol_bps / 1e4)).astype(float)
     else:
         out["vol_slip"] = 0.0
 
-    out["total_cost"] = out["spread_cost"] + out["fees"] + out["vol_slip"]
+    out["total_cost"] = out["fees"] + out["vol_slip"]
     return out

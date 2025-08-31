@@ -22,7 +22,7 @@ import numpy as np  # effiziente numerische Routinen
 
 # ------------------------- logarithmische Returns und lineare Returns -------------------------
 
-def returns(close: pd.Series, kind: str = "log") -> pd.Series:
+def returns(adj_close: pd.Series, kind: str = "log") -> pd.Series:
     """Logarithmische oder lineare Rendite berechnen.
 
     Parameters
@@ -38,8 +38,8 @@ def returns(close: pd.Series, kind: str = "log") -> pd.Series:
         Renditeserie mit ``NaN`` an der ersten Stelle.
     """
     if kind == "log":  # Zweig für logarithmische Rendite
-        return np.log(close / close.shift(1))  # ln(P_t / P_{t-1})
-    return close.pct_change()  # lineare prozentuale Veränderung
+        return np.log(adj_close / adj_close.shift(1))  # ln(P_t / P_{t-1})
+    return adj_close.pct_change()  # lineare prozentuale Veränderung
 
 # ------------------------- Spread und Vola Schätzung -------------------------
 

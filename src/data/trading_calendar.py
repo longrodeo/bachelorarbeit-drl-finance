@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# Datei: src/data/calendar.py
+# Datei: src/data/trading_calendar.py
 # Zweck: Bestimmung von Handelstagen der NYSE als Zeitbasis für Datenpipelines.
 # Hauptfunktion: ``nyse_trading_days`` erzeugt ``pd.DatetimeIndex`` zwischen zwei
 #   Daten.

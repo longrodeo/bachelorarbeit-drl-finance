@@ -189,7 +189,7 @@ def build_clean_data(
         px = df_asset.droplevel("asset").sort_index()  # reine Ein-Asset-Serie
 
         # Core-Features
-        daily_ret = returns(px["close"], kind="log")  # logarithmische Renditen
+        daily_ret = returns(px["adj_close"], kind="log")  # logarithmische Renditen
         adv20 = average_dollar_volume(px["close"], px["volume"], window=20)  # Liquidität
 
         beta = corwin_schultz_beta(px["high"], px["low"], sample_length=cs_sample_length)  # Spread-Proxies
@@ -210,7 +210,6 @@ def build_clean_data(
         cci20 = commodity_channel_index(px["high"], px["low"], px["close"], 20)
         adx_df = average_directional_index(px["high"], px["low"], px["close"], 14)
 
-        exec_ref = px["open"].shift(-1)  # Preis für t+1-Ausführung
 
         features = pd.DataFrame(
             {
@@ -249,7 +248,6 @@ def build_clean_data(
                 "negative_directional_index_14": adx_df["minus_di_14"],
 
                 # Exec/Flag
-                "execution_price_t_plus_1_open": exec_ref,  # für Simulation t+1
                 "is_cash": 0,
             },
             index=px.index,
