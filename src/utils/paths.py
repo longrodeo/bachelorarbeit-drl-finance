@@ -92,3 +92,24 @@ def get_window():
     start = str(SPEC.get("start", win.get("start", "2019-01-01")))
     end   = str(SPEC.get("end",   win.get("end",   "2019-03-31")))
     return start, end
+
+def get_project_root() -> Path:
+    """Projekt-Root = zwei Ebenen über dieser Datei (…/Bachelorarbeit)."""
+    return BASE_DIR
+
+ROOT        = get_project_root()
+DATA_DIR    = ROOT / "data"
+ACCOUNT_DIR = DATA_DIR / "accounting_demo"
+CONFIG_DIR  = ROOT / "config"
+
+# Clean-Panel & Accounting-Outputs
+CLEAN_PATH   = CLEAN_PANEL
+SNAP_PATH    = ACCOUNT_DIR / "portfolio_snapshots.parquet"
+REWARD_PATH  = ACCOUNT_DIR / "rewards_log.parquet"
+
+# State-Specs
+SPEC_S0_YAML = CONFIG_DIR / "state_s0.yml"
+SPEC_S1_YAML = CONFIG_DIR / "state_s1.yml"
+
+# Output für Debug/Plots
+OUT_DIR      = DATA_DIR / "states_demo"

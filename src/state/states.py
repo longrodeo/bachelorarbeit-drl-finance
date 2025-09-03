@@ -65,6 +65,13 @@ def build_state_for_date(
         "meta": { ... },
       }
     """
+
+    dlev = panel_clean.index.get_level_values("date")  # oder level="date"
+    if isinstance(dlev, pd.DatetimeIndex) and dlev.tz is not None:
+        dt = pd.Timestamp(date)
+        date = dt.tz_localize(dlev.tz) if dt.tzinfo is None else dt.tz_convert(dlev.tz)
+
+
     # --- A) Grundchecks
     assert isinstance(panel_clean.index, pd.MultiIndex) and panel_clean.index.nlevels == 2,\
         "panel_clean muss MultiIndex (date, asset) im Index haben."

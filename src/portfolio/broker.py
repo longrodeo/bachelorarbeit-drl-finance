@@ -5,6 +5,7 @@ from portfolio import execution as _execution
 from portfolio import fees as _fees
 
 
+
 EPS = 1e-12
 
 class PortfolioLite:
@@ -27,7 +28,7 @@ class PortfolioLite:
         self.value = float(initial_cash)
         self.weights = pd.Series(0.0, index=self.assets)
 
-    def step(self, px_t1: pd.DataFrame, w_target: pd.Series):
+    def step(self, px_t1: pd.DataFrame, w_target: pd.Series, cash_factor=None):
         # 1) Preise @ t+1 (Mark-to-Market nach Ausführung)
         p_ref = px_t1[self.col_ref].astype(float).reindex(self.assets)  # t+1 Open (Execution/Sizing)
         p_mark = px_t1[self.col_mark].astype(float).reindex(self.assets)  # t+1 Close (Bewertung)
@@ -86,6 +87,11 @@ class PortfolioLite:
 
         # 5) State-Update (Cash, Shares, Value, Weights)
         self.cash = self.cash - cash_delta
+        # Cash-Zins (Schritt t->t1) anwenden, falls übergeben
+        if cash_factor is not None:
+            self.cash *= float(cash_factor)
+
+
         self.shares = (self.shares + exec_df["q"]).reindex(self.assets).fillna(0.0)
         self.value = self.cash + float((self.shares * p_mark).sum())
         self.weights = (self.shares * p_mark) / max(self.value, EPS)

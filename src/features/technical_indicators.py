@@ -93,11 +93,25 @@ def exponential_moving_average(s: pd.Series, span: int) -> pd.Series:
     pd.Series
         EMA-Werte.
     """
-    return s.ewm(span=span, adjust=False, min_periods=span).mean()  # EMA-Berechnung
+    alpha = 2.0 / (span + 1.0)
+    return s.ewm(alpha=alpha, adjust=False, min_periods=0).mean()  # EMA-Berechnung
 
 
 def relative_strength_index(close: pd.Series, period: int = 14) -> pd.Series:
-    """RSI nach Wilder: misst Stärke von Auf‑ vs. Abwärtsbewegungen.
+    """Relative Strength Index (RSI), 0–100 misst Stärke von Auf‑ vs. Abwärtsbewegungen.
+
+    Definition:
+    - Δ_t = close.diff()
+    - gain = max(Δ_t, 0), loss = max(-Δ_t, 0)
+    - Glättung: EWM mit alpha = 1/period, adjust=False, min_periods=period
+      (kein explizites SMA-Initialisieren)
+    - Edge-Cases: keine erzwungenen 0/50/100-Sonderwerte; Ergebnis folgt direkt aus RS = avg_gain/avg_loss.
+
+    Hinweise:
+    - Diese Definition weicht in der Initialisierung und Edge-Case-Behandlung
+      geringfügig von Wilder/pandas-ta ab. Wir akzeptieren kleine Abweichungen,
+      dokumentieren sie quantitativ (siehe Tests), und prüfen primär
+      mathematische Invarianten (Range, affine Invarianz).
 
     Parameters
     ----------
@@ -162,7 +176,7 @@ def bollinger(close: pd.Series, window: int = 20, n_std: float = 2.0):
         Mittleres Band, oberes Band, unteres Band, relative Breite.
     """
     mid = simple_moving_average(close, window)  # gleitender Mittelwert
-    std = _safe_rolling(close, window).std()  # Standardabweichung im Fenster
+    std = _safe_rolling(close, window).std(ddof=0)  # Standardabweichung im Fenster
     upper = mid + n_std * std  # oberes Band
     lower = mid - n_std * std  # unteres Band
     width = (upper - lower) / mid.replace(0, np.nan)  # Bandbreite relativ zum Mittelwert
@@ -256,4 +270,35 @@ DEFAULTS = {  # typische Standardparameter für Indikatoren
     "adv": 20,  # Fenster für average dollar volume
     "cci": 20  # Periode für CCI
 }
+
+# Exakte RSI Wilder Funktion wie in pandas-ta
+
+def _rma(x: pd.Series, length: int) -> pd.Series:
+    x = x.astype('float64').copy()
+    r = pd.Series(np.nan, index=x.index, dtype='float64')
+    sma0 = x.rolling(length, min_periods=length).mean().iloc[length-1]
+    if pd.notna(sma0):
+        r.iloc[length-1] = sma0
+        for i in range(length, len(x)):
+            r.iloc[i] = (r.iloc[i-1] * (length - 1) + x.iloc[i]) / length
+    return r
+
+def rsi_wilder_exact(close: pd.Series, period: int = 14) -> pd.Series:
+    delta = close.astype('float64').diff()
+    gain = delta.clip(lower=0.0)
+    loss = (-delta).clip(lower=0.0)
+    avg_gain = _rma(gain, period)
+    avg_loss = _rma(loss, period)
+
+    rs = avg_gain / avg_loss
+    rsi = 100.0 - (100.0 / (1.0 + rs))
+
+    both_zero = (avg_gain == 0) & (avg_loss == 0)
+    loss_zero = (avg_loss == 0) & ~both_zero
+    gain_zero = (avg_gain == 0) & ~both_zero
+
+    rsi = rsi.where(~loss_zero, 100.0)
+    rsi = rsi.where(~gain_zero, 0.0)
+    rsi = rsi.where(~both_zero, 50.0)
+    return rsi
 

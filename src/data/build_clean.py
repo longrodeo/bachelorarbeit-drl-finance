@@ -68,86 +68,6 @@ def _downcast_feature_dtypes(df: pd.DataFrame) -> pd.DataFrame:
     return df  # DataFrame mit optimierten Datentypen zurückgeben
 
 
-def _build_cash_asset(
-    dates: pd.DatetimeIndex,
-    risk_free_annual: pd.Series,
-    day_count: int = 360,
-    symbol: str = "CASH",
- ) -> pd.DataFrame:
-
-    """Synthetisches CASH-Asset auf Basis risikofreier Tageszinsen.
-
-    Parameters
-    ----------
-    dates : pd.DatetimeIndex
-        Handelstage, auf denen das Asset notiert.
-    risk_free_annual : pd.Series
-        Jahreszins (dezimal) pro Handelstag.
-    day_count : int
-        Zins-Basis, meist 360.
-    symbol : str
-        Name des künstlichen Assets.
-
-    Returns
-    -------
-    pd.DataFrame
-        Preis- und Feature-Schema für das CASH-Asset.
-    """
-    rf = risk_free_annual.reindex(dates).ffill()  # fehlende Tage vorwärts füllen
-    date_series = pd.Series(pd.to_datetime(dates), index=pd.to_datetime(dates))  # Hilfsserie mit Tagesabständen
-    days_to_next = (date_series.shift(-1) - date_series).dt.days.fillna(1).astype(int)  # Abstand zum nächsten Handelstag
-
-    factor = 1.0 + rf * (days_to_next / float(day_count))  # einfache Verzinsung pro Intervall
-    factor.iloc[-1] = 1.0  # letzter Tag hat keinen Folgetag
-
-    close = factor.cumprod().astype("float64")  # kumulative Verzinsung als Schlusskurs
-    open_ = close.shift(1).fillna(1.0)  # Open = Close des Vortags, Startwert 1.0
-    high = np.maximum(open_.values, close.values)  # Tageshoch: Max aus Open/Close
-    low = np.minimum(open_.values, close.values)   # Tagestief: Min aus Open/Close
-
-    df_cash = pd.DataFrame(
-        {
-            # Rohschema beibehalten
-            "open": open_.values,                          # synthetischer Eröffnungskurs
-            "high": high,                                  # Tageshoch
-            "low": low,                                    # Tagestief
-            "close": close.values,                         # Schlusskurs
-            "adj_close": close.values,                     # identisch mangels Splits
-            "volume": 0.0,                                # kein Handelsvolumen
-            "dividends": 0.0,                             # keine Dividenden
-            "stock_splits": 1.0,                          # keine Splits
-            # Core-Features
-            "daily_return_log": np.log(factor.values),    # log. Tagesrendite
-            "average_dollar_volume_20": 0.0,              # Liquidität irrelevant
-            "volatility_becker_parkinson": 0.0,           # Volatilität = 0
-            "bid_ask_spread_corwin_schultz": 0.0,         # Spread = 0
-            # TA-Features: nicht sinnvoll für CASH
-            "simple_moving_average_20": np.nan,           # Indikatoren bleiben NaN
-            "simple_moving_average_60": np.nan,
-            "exponential_moving_average_12": np.nan,
-            "exponential_moving_average_26": np.nan,
-            "relative_strength_index_14": np.nan,
-            "macd_line_12_26_9": np.nan,
-            "macd_signal_12_26_9": np.nan,
-            "macd_histogram_12_26_9": np.nan,
-            "bollinger_middle_band_20_2.0": np.nan,
-            "bollinger_upper_band_20_2.0": np.nan,
-            "bollinger_lower_band_20_2.0": np.nan,
-            "bollinger_bandwidth_20_2.0": np.nan,
-            "commodity_channel_index_20": np.nan,
-            "average_directional_index_14": np.nan,
-            "positive_directional_index_14": np.nan,
-            "negative_directional_index_14": np.nan,
-            # Exec/Flag
-            "execution_price_t_plus_1_open": open_.shift(-1).values,  # Ausführungspreis nächster Tag
-            "is_cash": 1,                                            # Kennzeichnung als CASH
-        },
-        index=dates,
-    )
-    df_cash["asset"] = symbol  # Spalte für Assetnamen hinzufügen
-    return df_cash.reset_index().set_index(["date", "asset"])  # MultiIndex herstellen
-
-
 def build_clean_data(
     prices: pd.DataFrame,
     risk_free_annual: pd.Series,
@@ -254,11 +174,6 @@ def build_clean_data(
         )
         features["asset"] = asset  # Asset-Kennung hinzufügen
         frames.append(features.reset_index().set_index(["date", "asset"]))  # wieder MultiIndex
-
-    # --- CASH Asset ---
-    dates = prices.index.get_level_values(0).unique().sort_values()  # verfügbare Handelstage
-    cash_df = _build_cash_asset(dates, risk_free_annual, day_count=360, symbol=cash_symbol)  # Kunst-Asset
-    frames.append(cash_df)
 
     # --- Zusammenführen, Finalisieren ---
     panel = pd.concat(frames).sort_index()  # alles zusammenführen

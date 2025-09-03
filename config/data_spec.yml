@@ -9,7 +9,7 @@ assets:
   file: config/assets_regions.yml
 
 window:
-  start: "2015-01-01"
+  start: "2014-06-01"
   end: "2025-01-01"
 
 return_type: log        # für return_raw (log oder linear)
