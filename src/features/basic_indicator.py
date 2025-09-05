@@ -97,7 +97,7 @@ def corwin_schultz_alpha(beta: pd.Series, gamma: pd.Series) -> pd.Series:
     den = 3.0 - 2.0 * np.sqrt(2.0)  # Nenner der CS-Formel
     alpha = ((np.sqrt(2.0) - 1.0) / den) * np.sqrt(beta)  # erster Summand
     alpha = alpha - np.sqrt(gamma / den)  # zweiter Summand
-    return alpha.clip(lower=0.0)  # Spread ist nicht negativ definierbar
+    return alpha.clip(lower=0)  # Spread ist nicht negativ definierbar
 
 def corwin_schultz_spread(alpha: pd.Series) -> pd.Series:
     """Bid-Ask-Spread aus dem Alpha-Term ableiten.
@@ -114,6 +114,25 @@ def corwin_schultz_spread(alpha: pd.Series) -> pd.Series:
     """
     ex_alpha = np.exp(alpha)  # e^{alpha}
     return 2.0 * (ex_alpha - 1.0) / (1.0 + ex_alpha)  # Formel aus CS-Paper
+
+def corwin_schultz_spread_sanitized(alpha: pd.Series, roll: int = 5, floor: float = 1e-4) -> pd.Series:
+    """Robust: α clippen, Spread berechnen, glätten, füllen, floor setzen."""
+    alpha = alpha.clip(lower=0.0)
+    s = corwin_schultz_spread(alpha)             # <-- KEIN rekursiver Aufruf!
+    s = s.replace([np.inf, -np.inf], np.nan)
+
+    # NaN/≤0 maskieren
+    bad = (~np.isfinite(s)) | (s <= 0)
+    s = s.mask(bad)
+
+    # sanfte Median-Glättung
+    s = s.rolling(roll, min_periods=1).median()
+
+    # Fallback: Asset-Median > 0, sonst Floor
+    med = float(s[s > 0].median()) if (s > 0).any() else floor
+    if not np.isfinite(med) or med <= 0:
+        med = floor
+    return s.fillna(med).clip(lower=floor)
 
 def becker_parkinson_sigma(beta: pd.Series, gamma: pd.Series) -> pd.Series:
     """Volatilitätsabschätzung nach Becker/Parkinson.

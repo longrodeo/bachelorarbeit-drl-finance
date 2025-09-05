@@ -1,7 +1,7 @@
 # src/state/builder.py
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Dict, List, Mapping, Optional, Tuple, Literal
+from typing import Dict, List, Mapping, Optional, Tuple, Literal, Union
 import numpy as np
 import pandas as pd
 
@@ -49,6 +49,7 @@ def build_state_for_date(
     assets_order: List[str],                   # feste Asset-Reihenfolge (inkl. "CASH")
     portfolio_snapshot: Mapping[str, object],  # {"weights": Series|dict, "cash": float, "nav": float, "r_past" or "portfolio_return_prev": float}
     *,
+    riskfree: float,
     nan_fill_value: float = 0.0,               # Wert zum Füllen im Datenkanal
 ) -> Dict[str, object]:
     """
@@ -79,9 +80,8 @@ def build_state_for_date(
         # toleranter Slice, aber Hinweis
         pass
 
-    # CASH-Assert (hilfreich, da CASH im Raster erwartet)
     assets_order = list(assets_order)
-    assert "CASH" in assets_order, "CASH muss im assets_order enthalten sein."
+
 
     # --- B) Slice auf t → DataFrame (index=asset, columns=features)
     try:
@@ -124,6 +124,7 @@ def build_state_for_date(
     cash_val = portfolio_snapshot.get("cash")
     nav_val  = portfolio_snapshot.get("nav")
 
+
     g_scalars_list: List[float] = []
     g_scalar_names: List[str] = []
 
@@ -136,14 +137,9 @@ def build_state_for_date(
     _push(last_ret, "last_portfolio_return")
     _push(cash_val, "cash")
     _push(nav_val, "nav")
-    g_scalars = np.asarray(g_scalars_list, dtype=float)  # [G]
+    _push(riskfree, "riskfree_rate")
 
-    # --- E) Zusätzliche Sicherheitsasserts für CASH
-    # Falls vorhanden: daily_return_log für CASH sollte nicht NaN sein (Rf-Log)
-    if "daily_return_log" in spec.per_asset_features and "CASH" in df_t.index:
-        val = df_t.loc["CASH", "daily_return_log"]
-        if pd.isna(val):
-            raise ValueError("CASH.daily_return_log ist NaN – check CLEAN-Panel/Rf-Ableitung.")
+    g_scalars = np.asarray(g_scalars_list, dtype=float)  # [G]
 
     return {
         "X": X,
@@ -169,6 +165,7 @@ def build_states_batch(
     assets_order: List[str],
     snapshots: Mapping[pd.Timestamp, Mapping[str, object]],
     *,
+    riskfree: float,
     nan_fill_value: float = 0.0,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[pd.Timestamp]]:
     """
@@ -185,6 +182,7 @@ def build_states_batch(
             panel_clean=panel_clean, date=t, spec=spec,
             assets_order=assets_order,
             portfolio_snapshot=snapshots[t],
+            riskfree=riskfree,
             nan_fill_value=nan_fill_value,
         )
         Xs.append(s["X"])

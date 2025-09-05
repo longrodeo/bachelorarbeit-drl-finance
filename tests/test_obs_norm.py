@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from src.features.obs_norm import rolling_zscore
+from features.obs_norm import rolling_zscore
 
 def test_rolling_zscore_basic():
     rng = pd.date_range("2018-01-01", periods=300, freq="B")

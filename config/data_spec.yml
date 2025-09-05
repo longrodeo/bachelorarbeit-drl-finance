@@ -44,7 +44,7 @@ windows:
   adx: 14
 
 cs:
-  sample_length: 1
+  sample_length: 2
 
 risk_free:
   series_id: DFF

@@ -8,71 +8,11 @@ import pandas as pd
 
 from utils.parquet_io import load_parquet, save_parquet
 from utils.paths import ROOT, CLEAN_DIR, CONFIG_DIR
+from validation.data_checks import normalize_datetime_index, slice_by_year
+
 
 
 # ----------------- 1) Jahres-Parquets erzeugen -----------------
-import pandas as pd
-
-def _normalize_datetime_index(df: pd.DataFrame) -> tuple[pd.DataFrame, str | None]:
-    """
-    Bringt den Frame in eine Form mit Datums-Index:
-    - einfacher DatetimeIndex -> (df_sorted, None)
-    - MultiIndex -> (df_sorted, name_der_datums_ebene)
-    - Spaltenlayout -> setzt Datums-Spalte zum Index
-    Versucht 'date'/'datetime'/'timestamp'/'time' (case-insensitive).
-    """
-    # 1) einfacher DatetimeIndex
-    if isinstance(df.index, pd.DatetimeIndex):
-        return df.sort_index(), None
-
-    # 2) MultiIndex: Datums-Ebene finden oder konvertieren
-    if isinstance(df.index, pd.MultiIndex):
-        names = list(df.index.names)
-        # a) Ebene ist bereits datetime
-        for i, name in enumerate(names):
-            vals = df.index.get_level_values(i)
-            if isinstance(vals, pd.DatetimeIndex):
-                return df.sort_index(), name or names[i]
-        # b) Ebene mit "date"-ähnlichem Namen -> in datetime konvertieren
-        for i, name in enumerate(names):
-            if name and name.lower() in {"date","datetime","timestamp","time"}:
-                tmp = df.reset_index()
-                tmp[name] = pd.to_datetime(tmp[name], utc=True, errors="coerce")
-                tmp = tmp.set_index(names).sort_index()
-                return tmp, name
-        # c) Notlösung: erste Ebene versuchen zu parsen
-        first_name = names[0] or "date"
-        tmp = df.reset_index()
-        tmp[first_name] = pd.to_datetime(tmp[first_name], utc=True, errors="coerce")
-        tmp = tmp.set_index(names).sort_index()
-        if isinstance(tmp.index.get_level_values(0), pd.DatetimeIndex):
-            return tmp, names[0]
-        raise ValueError("MultiIndex ohne identifizierbare Datums-Ebene.")
-
-    # 3) Spaltenlayout: geeignete Spalte finden
-    for c in ("date","datetime","timestamp","time","Date","Timestamp"):
-        if c in df.columns:
-            out = df.copy()
-            out[c] = pd.to_datetime(out[c], utc=True, errors="coerce")
-            out = out.set_index(c).sort_index()
-            return out, None
-
-    cols = list(df.columns)
-    idx_names = list(df.index.names) if hasattr(df.index, "names") else [df.index.name]
-    raise ValueError(f"Keine Datums-Spalte/Ebene gefunden. index={idx_names}, columns={cols[:10]}")
-
-def _slice_by_year(df: pd.DataFrame, date_level: str | None, year: int) -> pd.DataFrame:
-    """
-    Jahres-Slice für einfachen Index oder MultiIndex.
-    """
-    if isinstance(df.index, pd.MultiIndex):
-        if date_level is None:
-            raise ValueError("date_level erforderlich für MultiIndex.")
-        idx = df.index.get_level_values(date_level)
-        return df[idx.year == year]
-    else:
-        return df[df.index.year == year]
-
 
 def split_parquets_by_year(
     features_parq: str | Path,
@@ -82,23 +22,23 @@ def split_parquets_by_year(
     out_cpcv_root: str | Path = "data/cpcv/years",
     out_wf_root: str | Path = "data/walk_forward/years",
 ) -> Dict[str, List[Path]]:
-    feats, feats_date_lvl = _normalize_datetime_index(load_parquet(features_parq))
-    rf, rf_date_lvl = _normalize_datetime_index(load_parquet(riskfree_parq))
+    feats, feats_date_lvl = normalize_datetime_index(load_parquet(features_parq))
+    rf, rf_date_lvl = normalize_datetime_index(load_parquet(riskfree_parq))
 
     created = {"cpcv_features":[], "cpcv_riskfree":[], "wf_features":[], "wf_riskfree":[]}
     out_cpcv_root = Path(out_cpcv_root); out_wf_root = Path(out_wf_root)
 
     for y in years_cpcv:
-        f = _slice_by_year(feats, feats_date_lvl, y)
-        r = _slice_by_year(rf, rf_date_lvl, y)
+        f = slice_by_year(feats, feats_date_lvl, y)
+        r = slice_by_year(rf, rf_date_lvl, y)
         p_f = out_cpcv_root/"features"/f"{y}.parquet"
         p_r = out_cpcv_root/"riskfree"/f"{y}.parquet"
         save_parquet(f, p_f); save_parquet(r, p_r)
         created["cpcv_features"].append(p_f); created["cpcv_riskfree"].append(p_r)
 
     for y in years_wf:
-        f = _slice_by_year(feats, feats_date_lvl, y)
-        r = _slice_by_year(rf, rf_date_lvl, y)
+        f = slice_by_year(feats, feats_date_lvl, y)
+        r = slice_by_year(rf, rf_date_lvl, y)
         p_f = out_wf_root/"features"/f"{y}.parquet"
         p_r = out_wf_root/"riskfree"/f"{y}.parquet"
         save_parquet(f, p_f); save_parquet(r, p_r)

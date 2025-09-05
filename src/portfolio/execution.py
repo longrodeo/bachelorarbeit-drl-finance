@@ -10,19 +10,19 @@ def _as_series(x, index) -> pd.Series:
     return pd.Series(x, index=index, dtype=float)
 
 # ------------------------- rechnet halben Spread aus -------------------------
-def half_spread_price(p_ref: pd.Series, side: pd.Series, spread: pd.Series) -> pd.Series:
+def half_spread_price(adj_open: pd.Series, side: pd.Series, spread: pd.Series) -> pd.Series:
     """
     Half-Spread-Adjust:
       Buy (side>0):  p_exec = p_ref * (1 + 0.5*spread)
       Sell(side<0):  p_exec = p_ref * (1 - 0.5*spread)
     """
-    p_ref = _as_series(p_ref, p_ref.index)
-    side = _as_series(side, p_ref.index).fillna(0.0)
-    spread = _as_series(spread, p_ref.index).fillna(0.0)
+    adj_open = _as_series(adj_open, adj_open.index)
+    side = _as_series(side, adj_open.index).fillna(0.0)
+    spread = _as_series(spread, adj_open.index).fillna(0.0)
 
     sign = np.where(side.values > 0, 1.0,
                     np.where(side.values < 0, -1.0, 0.0))
-    return p_ref * (1.0 + 0.5 * spread * sign)
+    return adj_open * (1.0 + 0.5 * spread * sign)
 
 # ------------------------- Rundet Stücke: Käufe floor, Verkäufe ceil (Standard: ganze Stücke) -------------------------
 def round_shares(q: pd.Series, lot: int = 1) -> pd.Series:
@@ -36,11 +36,10 @@ def round_shares(q: pd.Series, lot: int = 1) -> pd.Series:
 
 def plan_execution_series(
     q: pd.Series,                 # signierte Stücke (+Buy, -Sell), Index = assets
-    p_ref: pd.Series,             # Referenzpreis je Asset (T+1 Open)
+    adj_open: pd.Series,             # Referenzpreis je Asset (T Open)
     spread: Optional[pd.Series] = None,  # CS-Spread je Asset (dezimal, z.B. 0.001)
     *,
     fixed_spread_bps: Optional[float] = None,  # alternativ fixer Spread in bp
-    cash_assets: Optional[set] = None,         # z. B. {"CASH"} => Spread=0
 ) -> pd.DataFrame:
     """
     Einheitliche Ausführungslogik (pure, vektorisiert):
@@ -52,7 +51,7 @@ def plan_execution_series(
     """
     idx = q.index
     q = _as_series(q, idx).astype(float)
-    p_ref = _as_series(p_ref, idx).astype(float)
+    adj_open = _as_series(adj_open, idx).astype(float)
 
     if spread is not None:
         spread = _as_series(spread, idx).astype(float)
@@ -62,20 +61,15 @@ def plan_execution_series(
         else:
             spread = pd.Series(float(fixed_spread_bps) / 1e4, index=idx, dtype=float)
 
-    # CASH-Spreads auf 0 setzen (falls angegeben)
-    if cash_assets:
-        mask_cash = pd.Index(idx).isin(cash_assets)
-        if mask_cash.any():
-            spread = spread.mask(mask_cash, 0.0)
 
     side = np.sign(q).astype(float)
-    p_exec = half_spread_price(p_ref, side, spread)
+    p_exec = half_spread_price(adj_open, side, spread)
     notional_abs = (q.abs() * p_exec).astype(float)
-    spread_cost  = (q.abs() * p_ref * 0.5 * spread).astype(float)
+    spread_cost  = (q.abs() * adj_open * 0.5 * spread).astype(float)
 
     out = pd.DataFrame({
         "q": q,
-        "p_ref": p_ref,
+        "adj_open": adj_open,
         "p_exec": p_exec,
         "notional_abs": notional_abs,
         "spread_cost": spread_cost,

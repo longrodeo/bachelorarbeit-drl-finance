@@ -58,9 +58,7 @@ def main():
     print(f"[4/5] CLEAN/Features → {CLEAN_PANEL}")
     features = build_clean_data(
         prices=panel_interim,
-        risk_free_annual=rf_annual,   # annualisiert (dezimal), as-of-t
         out_path=str(CLEAN_PANEL),
-        cash_symbol=(SPEC.get("cash", {}) or {}).get("symbol", "CASH"),
         cs_sample_length=int((SPEC.get("cs", {}) or {}).get("sample_length", 1)),
     )  # Feature-Panel inklusive CASH erzeugen
 

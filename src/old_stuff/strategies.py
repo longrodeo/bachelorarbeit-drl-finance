@@ -2,7 +2,7 @@
 import pandas as pd
 import numpy as np
 from src.returns import Returns
-from src.kpis import KPI
+from old_stuff.kpis import KPI
 
 class Strategies:
     """

@@ -38,8 +38,8 @@ def _resolve_fred_api_key(passed: Optional[str] = None) -> str:
     str
         Gefundener API-Key.
     """
-    # key = "Platzhalter"  # exemplarischer Platzhalter (nicht genutzt)
-    key = passed or os.environ.get("FRED_API_KEY") or os.environ.get("FRED_API_TOKEN") or os.environ.get("FRED_KEY")  # schrittweise Auflösung
+    key = "d94ae2e1f33af6364d0754e50e7cb7b7"  # exemplarischer Platzhalter (nicht genutzt)
+    # key = passed or os.environ.get("FRED_API_KEY") or os.environ.get("FRED_API_TOKEN") or os.environ.get("FRED_KEY")  # schrittweise Auflösung
     if not key:  # falls kein Key ermittelt wurde
         raise ValueError("FRED API Key fehlt. Setze FRED_API_KEY (oder übergib api_key=...).")  # eindeutige Fehlermeldung
     return key  # zurückgeben des Strings
@@ -124,7 +124,7 @@ def annual_pct_to_daily_rate(y_annual_pct: pd.Series, basis: int = 360) -> pd.Se
     pd.Series
         Tageszinssätze in Dezimalform.
     """
-    return (y_annual_pct.astype(float) / 100.0) / float(basis)  # Prozent → Dezimal / Basis
+    return y_annual_pct.astype(float) / float(basis)  # Prozent → Dezimal / Basis
 
 def daily_factor(y_annual_pct: pd.Series, basis: int = 360) -> pd.Series:
     """Multiplikativen Faktor ``1 + r_d`` aus Jahresprozenten ableiten.

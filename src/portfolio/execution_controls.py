@@ -1,82 +1,115 @@
-from typing import Tuple, Dict
+from typing import Tuple
 import numpy as np
 
-def no_trade_band(w_prev: np.ndarray, w_target: np.ndarray, delta_l1: float = 0.03) -> Tuple[np.ndarray, float]:
+def no_trade_band(
+    weights_prev: np.ndarray,
+    weights_target: np.ndarray,
+    min_change_l1: float = 0.03
+) -> Tuple[np.ndarray, float]:
     """
-    Rebalance nur, wenn sich Zielgewichte spürbar ändern.
-    - L1-Abstand (sum(abs(diff))) > delta_l1 → handeln, sonst nix.
+    Rebalancing erst ab einer spürbaren Zieländerung.
+    Kriterium: L1-Abstand (sum(abs(target - prev))) > min_change_l1.
+
+    Args:
+        weights_prev: Aktuelle Gewichte (Summe≈1, long-only erwartet)
+        weights_target: Zielgewichte (Summe≈1, long-only erwartet)
+        min_change_l1: L1-Schwelle (z. B. 0.03 == 3 % der "Torte")
+
+    Returns:
+        weights_exec : Entweder unverändert (prev) oder Ziel (target)
+        l1_distance  : Gemessener L1-Abstand zwischen prev & target
     """
-    w_prev = np.asarray(w_prev, dtype=float)
-    w_target = np.asarray(w_target, dtype=float)
-    if w_prev.shape != w_target.shape:
-        raise ValueError("w_prev and w_target müssen die gleiche Form haben")
-    l1 = float(np.abs(w_target - w_prev).sum())
-    if l1 > delta_l1:
-        return w_target, l1  # handeln
+    weights_prev = np.asarray(weights_prev, dtype=float)
+    weights_target = np.asarray(weights_target, dtype=float)
+    if weights_prev.shape != weights_target.shape:
+        raise ValueError("weights_prev und weights_target müssen die gleiche Form haben")
+
+    l1_distance = float(np.abs(weights_target - weights_prev).sum())
+    if l1_distance > min_change_l1:
+        return weights_target, l1_distance  # handeln
     else:
-        return w_prev, l1  # nichts tun
+        return weights_prev, l1_distance    # nichts tun
+
 
 def apply_turnover_cap(
-    w_prev: np.ndarray,
-    w_target: np.ndarray,
-    tau_l1: float = 0.30,
+    weights_prev: np.ndarray,
+    weights_target: np.ndarray,
+    max_step_l1: float = 0.30,
     eps: float = 1e-12
 ) -> Tuple[np.ndarray, float, float]:
     """
-    Begrenze den Rebalance-Schritt (L1-Norm) auf tau_l1.
-    - Wenn L1(w_target - w_prev) <= tau_l1: gehe voll zu w_target (scale=1).
-    - Sonst: gehe nur anteilig in Richtung w_target mit scale = tau_l1 / L1(...).
-    Hinweis:
-    - Liegen w_prev & w_target auf dem Simplex (>=0, Summe=1), bleibt w_exec das auch
+    Begrenze den Rebalance-Schritt (L1-Norm) auf max_step_l1.
+
+    - Wenn L1(target - prev) <= max_step_l1: voll zum Ziel (applied_scale=1).
+    - Sonst: nur anteilig in Richtung Ziel mit applied_scale = max_step_l1 / L1(...).
+
+    Hinweise:
+    - Liegen prev & target auf dem Simplex (>=0, Summe=1), bleibt das Ergebnis das auch
       (Konvexkombination). Kleine numerische Abweichungen werden renormalisiert.
 
     Returns:
-        w_exec : ausgeführte Gewichte nach Cap
-        l1_req : ursprünglicher L1(w_target - w_prev)
-        scale  : tatsächlich verwendeter Schrittfaktor in [0,1]
+        weights_exec   : Ausgeführte Gewichte nach Cap
+        l1_requested   : Ursprünglicher L1-Abstand target - prev
+        applied_scale  : Verwendeter Schrittfaktor in [0,1]
     """
-    w_prev = np.asarray(w_prev, dtype=float)
-    w_target = np.asarray(w_target, dtype=float)
-    if w_prev.shape != w_target.shape:
-        raise ValueError("w_prev and w_target müssen die gleiche Form haben")
-    if tau_l1 < 0:
-        raise ValueError("tau_l1 muss >= 0")
+    weights_prev = np.asarray(weights_prev, dtype=float)
+    weights_target = np.asarray(weights_target, dtype=float)
+    if weights_prev.shape != weights_target.shape:
+        raise ValueError("weights_prev und weights_target müssen die gleiche Form haben")
+    if max_step_l1 < 0:
+        raise ValueError("max_step_l1 muss >= 0 sein")
 
-    diff = w_target - w_prev
-    l1_req = float(np.abs(diff).sum())
+    diff = weights_target - weights_prev
+    l1_requested = float(np.abs(diff).sum())
 
-    if l1_req <= tau_l1 + eps or l1_req <= eps or tau_l1 >= 2.0 - eps:
-        w_exec = w_target.copy()
-        scale = 1.0
+    if l1_requested <= max_step_l1 + eps or l1_requested <= eps or max_step_l1 >= 2.0 - eps:
+        weights_exec = weights_target.copy()
+        applied_scale = 1.0
     else:
-        scale = float(tau_l1 / l1_req)
-        w_exec = w_prev + scale * diff
+        applied_scale = float(max_step_l1 / l1_requested)
+        weights_exec = weights_prev + applied_scale * diff
 
-    # numerische Sanity: auf Simplex zurück (falls Minusrundungen / Summen-Drift)
-    w_exec = np.maximum(w_exec, 0.0)
-    s = w_exec.sum()
-    if s > eps:
-        w_exec = w_exec / s
-    else:
-        # fallback: alles Cash auf erstes Asset (sollte praktisch nie passieren)
-        w_exec = np.zeros_like(w_exec)
-        w_exec[0] = 1.0
+    # numerische Sanity: Simplex sichern
+    weights_exec = np.maximum(weights_exec, 0.0)
 
-    return w_exec, l1_req, scale
+    # Budget-Pfad einhalten (nur nach unten begrenzen, kein Hochskalieren -> Cash bleibt Cash)
+    s_prev = float(weights_prev.sum())
+    s_tgt  = float(weights_target.sum())
+    s_desired = s_prev + applied_scale * (s_tgt - s_prev)
+
+    s_cur = float(weights_exec.sum())
+    if s_cur > 0.0:
+        scale = min(1.0, s_desired / s_cur)  # nur downscalen
+        if scale < 1.0 - 1e-12:
+            weights_exec *= scale
+
+    return weights_exec, l1_requested, applied_scale
+
 
 def apply_execution_controls(
-    w_prev: np.ndarray,
-    w_target: np.ndarray,
-    delta_l1: float = 0.03,
-    tau_l1: float = 0.20,
-) -> Tuple[np.ndarray, Dict[str, float]]:
+    weights_prev: np.ndarray,
+    weights_target: np.ndarray,
+    min_change_l1: float = 0.03,
+    max_step_l1: float = 0.20,
+) -> Tuple[np.ndarray, dict[str, float]]:
     """
     Pipeline: zuerst No-Trade-Band, dann Turnover-Cap.
     Gibt finale Gewichte + Info-Dict zurück.
     """
-    w_after_ntb, l1_dist = no_trade_band(w_prev, w_target, delta_l1=delta_l1)
-    if np.allclose(w_after_ntb, w_prev):
-        return w_prev, {"acted": 0.0, "l1_dist": l1_dist, "scale": 0.0, "l1_step": 0.0}
-    w_exec, l1_req, scale = apply_turnover_cap(w_prev, w_after_ntb, tau_l1=tau_l1)
-    l1_step = float(np.abs(w_exec - w_prev).sum())
-    return w_exec, {"acted": 1.0, "l1_dist": l1_dist, "l1_req": l1_req, "scale": scale, "l1_step": l1_step}
+    after_ntb, l1_distance = no_trade_band(
+        weights_prev, weights_target, min_change_l1=min_change_l1
+    )
+    if np.allclose(after_ntb, weights_prev):
+        return weights_prev, {"acted": 0.0, "l1_distance": l1_distance, "applied_scale": 0.0, "l1_step": 0.0}
+
+    weights_exec, l1_requested, applied_scale = apply_turnover_cap(
+        weights_prev, after_ntb, max_step_l1=max_step_l1
+    )
+    l1_step = float(np.abs(weights_exec - weights_prev).sum())
+    return weights_exec, {
+        "acted": 1.0,
+        "l1_distance": l1_distance,
+        "l1_requested": l1_requested,
+        "applied_scale": applied_scale,
+        "l1_step": l1_step,
+    }

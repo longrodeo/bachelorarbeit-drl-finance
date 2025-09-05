@@ -1,7 +1,6 @@
 # src/accounting/evaluator.py
 from __future__ import annotations
 from pathlib import Path
-from typing import Tuple
 import numpy as np
 import pandas as pd
 
@@ -13,48 +12,62 @@ EPS = 1e-12
 
 # --------- Hilfsfunktionen: (C)VaR & CVaR-Serien --------------------------------
 
-def _var_cvar_from_array(x: np.ndarray, alpha: float) -> Tuple[float, float]:
-    """
-    Empirischer VaR/CVaR der linken Tail (alpha in (0,1)).
-    x: 1D-Array der (Log-)Returns.
-    """
-    x = x[np.isfinite(x)]
-    if x.size == 0:
-        return 0.0, 0.0
-    var = float(np.quantile(x, alpha, method="linear"))
-    tail = x[x <= var]
-    if tail.size == 0:
-        cvar = var
-    else:
-        cvar = float(np.mean(tail))
-    return var, cvar
-
-
-def _rolling_cvar(
+def mts_var_cvar_icvar(
     r: pd.Series,
     *,
-    alpha: float,
-    window: int,
-    include_current: bool,  # ex_post=True, ex_ante=False
-    ewm_alpha: float | None = None,
-) -> pd.Series:
+    alpha: float = 0.05,        # Tail-Masse (z.B. 0.05 = 5%-Left-Tail)
+    min_period: int = 1,        # ab wie vielen Punkten schätzen
+    include_current: bool = True,  # ex_post=True, ex_ante=False
+    ewm_alpha: float | None = None, # optional Glättung auf CVaR
+    as_series: bool = False
+):
     """
-    Rolling-CVaR-Serie. Für ex-ante wird die Return-Serie vor dem Rolling um 1 nach unten geshiftet,
-    so dass das Fenster bis t-1 endet. Für ex-post wird nicht geshiftet (Fenster endet bei t).
-    Optional: ewm-Glättung auf der CVaR-Serie.
-    """
-    r_use = r if include_current else r.shift(1)
-    def _cvar_window(a: np.ndarray) -> float:
-        _, cvar = _var_cvar_from_array(a, alpha)
-        return cvar
+    MTS-Definition auf VERLUST-Skala (>=0):
+      VaR_{α,t} = - Quantil_α({X_1..X_t})
+      CVaR_{α,t} = VaR_{α,t} + (1/(α t)) * sum_{k<=t} max( (-X_k) - VaR_{α,k}, 0 )
+      ICVaR_{α,t} = CVaR_{α,t} - CVaR_{α,t-1}
 
-    cvar = r_use.rolling(window=window, min_periods=window).apply(
-        lambda w: _cvar_window(w.astype(float)), raw=True
+    r : Return-Serie X_t (negatives Tail ist 'bad'), zeitlich sortiert.
+    Gibt zurück: (VaR_t_loss>=0, CVaR_t_loss>=0, ICVaR_t_loss)
+    """
+    r_use = r if include_current else r.shift(1)             # ex-post vs ex-ante
+    # Anzahl gültiger Beobachtungen (t)
+    n = r_use.expanding().count()
+
+    # (1) VaR_k (auf LOSS-Skala) via Return-Quantil
+    var_ret = r_use.expanding(min_periods=min_period).apply(
+        lambda a: np.quantile(a[np.isfinite(a)], alpha, method="linear"),
+        raw=True
     )
+    var_loss = -var_ret  # positiv
 
+    # (2) Exzessverluste relativ zu VaR_k
+    L = -r_use
+    excess = (L - var_loss).clip(lower=0)
+
+    # (3) CVaR_t: VaR_t + (kumul. Exzess)/(α * t)
+    cum_excess = excess.fillna(0).cumsum()
+    cvar_loss = var_loss + (cum_excess / (alpha * n)).where(n >= min_period)
+
+    # optional Glättung nur auf der CVaR-Serie
     if ewm_alpha is not None:
-        cvar = cvar.ewm(alpha=float(ewm_alpha), adjust=False).mean()
-    return cvar
+        cvar_loss = cvar_loss.ewm(alpha=float(ewm_alpha), adjust=False).mean()
+
+    icvar = cvar_loss.diff()
+
+    if as_series:
+        return var_loss, cvar_loss, icvar
+
+    # --- Skalare (nur t & t-1) ---
+    s = cvar_loss.dropna()
+    if len(s) == 0:
+        return 0.0, 0.0, 0.0
+    if len(s) == 1:
+        x = float(s.iloc[-1])
+        return 0.0, x, x
+    cvar_t = float(s.iloc[-1])
+    cvar_tm1 = float(s.iloc[-2])
+    return cvar_t - cvar_tm1, cvar_t, cvar_tm1
 
 
 # --------- MDD / ΔMDD ------------------------------------------------------------
@@ -99,31 +112,33 @@ def compute_rewards_from_snapshots(
     snaps = load_parquet(snaps_path)
     # Eine Zeile je Round (falls im Snapshot je Asset dupliziert ist)
     base = (
-        snaps[["round", "t", "t_plus_1", "portfolio_value_t1"]]
+        snaps[["round", "t", "portfolio_value_t"]]
         .drop_duplicates(subset=["round"])
         .sort_values("round")
         .reset_index(drop=True)
     )
-    base = base.rename(columns={"portfolio_value_t1": "nav_t1"})
+    base = base.rename(columns={"portfolio_value_t": "nav_t"})
     # NAV_t = Shift von NAV_{t+1}
-    base["nav_t"] = base["nav_t1"].shift(1)
+    base["nav_t-1"] = base["nav_t"].shift(1)
 
     # 2) r_log_t (additiv)
-    base["r_log_t"] = np.log(base["nav_t1"].clip(lower=EPS) / base["nav_t"].clip(lower=EPS))
+    base["r_log_t"] = np.log(base["nav_t"].clip(lower=EPS) / base["nav_t-1"].clip(lower=EPS))
 
     # 3) CVaR/ICVaR je nach Spec
     if spec.kind in ("icvar", "icvar_dd"):
         include_current = (spec.icvar_mode == "ex_post")
-        cvar = _rolling_cvar(
+        var ,cvar, icvar = mts_var_cvar_icvar(
             base["r_log_t"],
             alpha=spec.alpha,
-            window=spec.window,
+            min_period=spec.min_period,
             include_current=include_current,
             ewm_alpha=spec.ewm_alpha,
+            as_series=True
         )
+        base["var_t"] = var
         base["cvar_t"] = cvar
         base["cvar_tminus1"] = base["cvar_t"].shift(1)
-        base["icvar_t"] = base["cvar_t"] - base["cvar_tminus1"]
+        base["icvar_t"] = icvar
         # Warm-up: fehlende Werte (NaN) setzen wir konservativ auf 0 (keine Strafe am Anfang)
         base["icvar_t"] = base["icvar_t"].fillna(0.0)
     else:
@@ -132,9 +147,9 @@ def compute_rewards_from_snapshots(
     # 4) ΔMDD_t (nur für icvar_dd relevant, sonst 0)
     if spec.kind == "icvar_dd":
         # MDD auf NAV_t- und NAV_{t+1}-Pfad (beide aus derselben Round-Tabelle baubar)
-        mdd_t = _mdd_series(base["nav_t"].ffill())
-        mdd_t1 = _mdd_series(base["nav_t1"].ffill())
-        # bis t+1
+        mdd_t = _mdd_series(base["nav_t-1"].ffill())
+        mdd_t1 = _mdd_series(base["nav_t"].ffill())
+        # bis t
         delta = (mdd_t1 - mdd_t).clip(lower=0.0)                           # nur Verschlechterungen
         base["delta_mdd_t"] = delta.fillna(0.0)
     else:
@@ -151,13 +166,12 @@ def compute_rewards_from_snapshots(
         raise ValueError(f"Unbekannte Reward-Variante: {spec.kind}")
 
     # 6) Clean-up: erste Round hat nav_t = NaN -> r_log_t/Reward nicht definiert => droppen
-    out = base.dropna(subset=["nav_t"]).copy()
+    out = base.dropna(subset=["nav_t-1"]).copy()
 
     # 7) Metadaten/Parameter anhängen (nützlich für spätere Auswertungen)
     out["reward_kind"] = spec.kind
     out["icvar_mode"] = spec.icvar_mode
     out["alpha"] = spec.alpha
-    out["window"] = spec.window
     out["lambda_"] = spec.lambda_
     out["gamma"] = spec.gamma
     out["estimator"] = spec.estimator

@@ -21,7 +21,7 @@ vorhandenes CASH-Asset im Input.
 # ``from __future__`` erlaubt spätere Typreferenzen ohne String-Literale
 from __future__ import annotations
 # ``Optional``-Alias für optionale Parameter bei Manifest/Output-Pfaden
-from typing import Optional
+from typing import Optional, Hashable
 # Metainformationen über Python-Version usw. für Manifest
 import platform  # Versionsinfo fürs Manifest
 import numpy as np  # numerische Operationen
@@ -41,7 +41,7 @@ from src.features.basic_indicator import (
     corwin_schultz_gamma,
     corwin_schultz_alpha,
     becker_parkinson_sigma,     # Volaproxy
-    corwin_schultz_spread,      # finaler Spread
+    corwin_schultz_spread_sanitized,      # finaler Spread
 )
 # Technische Indikatoren zur Trend-/Volatilitätsanalyse
 from src.features.technical_indicators import (
@@ -67,13 +67,39 @@ def _downcast_feature_dtypes(df: pd.DataFrame) -> pd.DataFrame:
             df[c] = df[c].astype("int64")  # int64 für Mengen/Volumen
     return df  # DataFrame mit optimierten Datentypen zurückgeben
 
+def open_adj(open_s: pd.Series, close_s: pd.Series, adj_close_s: pd.Series) -> pd.Series:
+    """
+    Berechnet adj_open = open * (adj_close/close) auf Serienbasis.
+    Index-kompatibel (gleiche Dates) und robust gegen NaNs/Inf.
+    """
+    scale = (adj_close_s.astype(float) / close_s.astype(float)).replace([np.inf, -np.inf], np.nan)
+    scale = scale.where(scale > 0).fillna(1.0)  # Guards: keine negativen/NaN-Skalen
+    return (open_s.astype(float) * scale).astype(float)
+
+
+def _fmt_label(k: Hashable) -> str:
+    return "/".join(map(str, k)) if isinstance(k, tuple) else str(k)
+
+
+def _check_open_adj_invariants(px: pd.DataFrame, asset: Hashable, tol: float = 1e-6) -> None:
+    name = _fmt_label(asset)
+    r1 = (px["adj_open"] / px["adj_close"]).astype(float)
+    r2 = (px["open"]     / px["close"]).astype(float)
+    m = (r1 - r2).abs().median(skipna=True)
+    if pd.notna(m) and m > tol:
+        print(f"[adj_open CHECK] {name}: median|Δ|={m:.2e} "
+              f"(med adj_open/adj_close={r1.median(skipna=True):.4f}, med open/close={r2.median(skipna=True):.4f})")
+    scale = (px["adj_close"] / px["close"]).astype(float)
+    bad = (~np.isfinite(scale)) | (scale <= 0)
+    if bad.any():
+        print(f"[adj_open CHECK] {name}: {int(bad.sum())} invalide scale-Werte.")
+
 
 def build_clean_data(
     prices: pd.DataFrame,
-    risk_free_annual: pd.Series,
     out_path: Optional[str] = None,
-    cash_symbol: str = "CASH",
-    cs_sample_length: int = 1,   # Corwin–Schultz: Spanne (typisch 1–2)
+    cs_sample_length: int = 2, # Corwin–Schultz: Spanne (typisch 1–2)
+    verify: bool = True,
  ) -> pd.DataFrame:
     """Feature-Panel mit technischen Kennzahlen und CASH-Asset erzeugen.
 
@@ -98,8 +124,7 @@ def build_clean_data(
     # Input-Checks
     if not isinstance(prices.index, pd.MultiIndex) or prices.index.names != ["date", "asset"]:
         raise ValueError("prices muss MultiIndex mit Indexnamen ['date','asset'] besitzen.")
-    if cash_symbol in prices.index.get_level_values("asset"):
-        raise ValueError(f"Input darf {cash_symbol} noch nicht enthalten.")
+
 
     prices = prices.sort_index()  # sicherstellen, dass Daten zeitlich sortiert sind
     frames = []  # Sammelliste für Asset-DataFrames
@@ -109,6 +134,7 @@ def build_clean_data(
         px = df_asset.droplevel("asset").sort_index()  # reine Ein-Asset-Serie
 
         # Core-Features
+        adj_open = open_adj(px["open"], px["close"], px["adj_close"])
         daily_ret = returns(px["adj_close"], kind="log")  # logarithmische Renditen
         adv20 = average_dollar_volume(px["close"], px["volume"], window=20)  # Liquidität
 
@@ -117,7 +143,25 @@ def build_clean_data(
         sigma_bp = becker_parkinson_sigma(beta, gamma)  # Volatilität aus High/Low
 
         alpha = corwin_schultz_alpha(beta, gamma)
-        spread_cs = corwin_schultz_spread(alpha)  # Bid-Ask-Spread-Schätzung
+
+        CRYPTO_BASES = {"BTC-USD", "ETH-USD"}
+
+        def _is_crypto_label(asset) -> bool:
+            s = "/".join(map(str, asset)) if isinstance(asset, tuple) else str(asset)
+            base = s.split("-")[0].upper()
+            return base in CRYPTO_BASES or s.endswith("-USD")
+
+        if _is_crypto_label(asset):
+            # Konstante, konservative Crypto-Kosten (30 bp), optional glätten
+            spread_cs = pd.Series(0.0030, index=px.index, dtype=float)
+        else:
+            # Sanitized CS
+            spread_cs = corwin_schultz_spread_sanitized(alpha, roll=5, floor=1e-4)
+
+        # Debug: wie viel alpha <= 0?  (einmalig ok)
+        """neg = int((alpha <= 0).sum())
+        tot = int(alpha.shape[0])
+        print(f"[CS] {asset}: alpha<=0 = {neg}/{tot} ({neg / tot:.1%})")"""
 
         # TA-Features
         sma20 = simple_moving_average(px["close"], 20)  # kurzfristiger Trend
@@ -130,6 +174,10 @@ def build_clean_data(
         cci20 = commodity_channel_index(px["high"], px["low"], px["close"], 20)
         adx_df = average_directional_index(px["high"], px["low"], px["close"], 14)
 
+        px_check = px[["open", "close", "adj_close"]].copy()
+        px_check["adj_open"] = adj_open
+        if verify:  # neuer Funktionsparameter von build_clean_data(...)
+            _check_open_adj_invariants(px_check, asset)
 
         features = pd.DataFrame(
             {
@@ -138,6 +186,7 @@ def build_clean_data(
                 "high": px["high"],  # Tageshoch
                 "low": px["low"],    # Tagestief
                 "close": px["close"],  # Schlusskurs
+                "adj_open": adj_open, # bereinigter Kurs
                 "adj_close": px["adj_close"],  # bereinigter Kurs
                 "volume": px["volume"].astype("float64"),  # Handelsvolumen
                 "dividends": px["dividends"],  # ausgezahlte Dividenden

@@ -15,17 +15,17 @@ class AccountingRecorder:
             df = pd.concat([old, df], ignore_index=True)
         save_parquet(df, path)
 
-    def log_round(self, t, t_plus_1, assets, p1, cash, shares,
+    def log_round(self, t, assets, p1, cash, shares,
                   w_post, exec_df, fees_df, round_id: int):
         # Snapshots
         snap = pd.DataFrame({
-            "round": round_id, "t": t, "t_plus_1": t_plus_1,
+            "round": round_id, "t": t,
             "asset": assets,
-            "p_close_t1": p1.reindex(assets).values,
+            "p_close_t": p1.reindex(assets).values,
             "shares": shares.reindex(assets).values,
-            "weight_post_t1": w_post.reindex(assets).values,
+            "weight_post_t": w_post.reindex(assets).values,
             "cash": cash,
-            "portfolio_value_t1": float((shares*p1).sum() + cash),
+            "portfolio_value_t": float((shares*p1).sum() + cash),
             "fees_total_round": float(fees_df["total_cost"].sum()),
         })
         self._append(snap, self.snap_path)
@@ -33,7 +33,7 @@ class AccountingRecorder:
         # Events (nur q != 0)
         evt = exec_df.join(fees_df[["fees","vol_slip","total_cost"]], how="left")
         evt = evt.reset_index(names=["asset"])
-        evt["round"] = round_id; evt["t"] = t; evt["t_plus_1"] = t_plus_1
+        evt["round"] = round_id; evt["t"] = t
         evt = evt.loc[evt["q"] != 0]
         if not evt.empty:
             self._append(evt, self.evt_path)
