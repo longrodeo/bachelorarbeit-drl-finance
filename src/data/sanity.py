@@ -5,7 +5,7 @@ from typing import Tuple
 import pandas as pd
 
 from src.utils.paths import CLEAN_DIR, DATA_DIR
-from src.validation.data_checks import (
+from src.validation.check_cpcv_data import (
     normalize_datetime_index, check_datetime_index, compare_year_splits_to_master, CheckResult
 )
 from src.utils.parquet_io import load_parquet

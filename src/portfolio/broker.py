@@ -18,7 +18,7 @@ class PortfolioLite:
                  target_vol_annual=0.10,  # 10% p.a. (nur falls vol-targeting an)
                  vol_span=60,  # EWMA-Fenster (daily)
                  min_change_l1=0.03,  # No-Trade-Band (L1)
-                 max_step_l1=0.30):  # Turnover-Cap (L1)
+                 max_step_l1=0.3):  # Turnover-Cap (L1)
         self.assets = list(assets); self.A = len(self.assets)
         self.col_mark, self.col_ref, self.col_spread = col_mark, col_ref, col_spread
         self.lot_size =  int(lot_size)
@@ -133,6 +133,30 @@ class PortfolioLite:
             exec_df = self.exec.plan_execution_series(q=q, adj_open=adj_open, spread=spread)
             fees_df = self.fees.apply_fees(exec_df, **self.fee_kwargs)
             cash_delta = float((exec_df["q"] * exec_df["p_exec"]).sum()) + float(fees_df["total_cost"].sum())
+
+        # --- Cash-Guard (2): nach Rundung/Fees sicherstellen, dass Cash >= 0
+        if self.cash - cash_delta < 0.0 and cash_delta > EPS:
+            # Greedy: kleinste Kauf-Tickets streichen, bis der Cash reicht
+            buys = exec_df[exec_df["q"] > 0].copy()
+            if not buys.empty:
+                # Ticketkosten inkl. Fees für Sortierung
+                ticket_cost = buys["q"] * buys["p_exec"] + fees_df.loc[buys.index, "total_cost"]
+                for idx in ticket_cost.sort_values().index:
+                    # Ticket entfernen
+                    q.loc[idx] = 0.0
+                    # Execution + Fees neu rechnen
+                    exec_df = self.exec.plan_execution_series(q=q, adj_open=adj_open, spread=spread)
+                    fees_df = self.fees.apply_fees(exec_df, **self.fee_kwargs)
+                    cash_delta = float((exec_df["q"] * exec_df["p_exec"]).sum()) + float(fees_df["total_cost"].sum())
+                    if self.cash - cash_delta >= 0.0:
+                        break
+
+            # Falls immer noch knapp negativ (numerisch): alles kaufen stoppen
+            if self.cash - cash_delta < 0.0:
+                q = q.where(q <= 0.0, 0.0)
+                exec_df = self.exec.plan_execution_series(q=q, adj_open=adj_open, spread=spread)
+                fees_df = self.fees.apply_fees(exec_df, **self.fee_kwargs)
+                cash_delta = float((exec_df["q"] * exec_df["p_exec"]).sum()) + float(fees_df["total_cost"].sum())
 
         # 5) State-Update (Cash, Shares, Value, Weights)
         self.cash = self.cash - cash_delta

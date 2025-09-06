@@ -1,4 +1,4 @@
-# src/validation/data_checks.py
+# src/validation/check_cpcv_data.py
 from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,6 +19,31 @@ class CheckResult:
         return False
 
 # ---------- Helpers für Index ----------
+def to_daily_utc_index(df: pd.DataFrame, date_level: Optional[str] = None) -> pd.DataFrame:
+    """Erzwinge UTC-tagesbasierten Index (00:00:00), sortiert & ohne Duplikate."""
+    out = df.copy()
+    if isinstance(out.index, pd.MultiIndex):
+        # Datums-Level bestimmen
+        lvl = date_level
+        if lvl is None:
+            for n in out.index.names:
+                if n and n.lower() in {"date","datetime","timestamp","time"}:
+                    lvl = n
+                    break
+            if lvl is None:
+                lvl = out.index.names[0]
+        # Datums-Level normalisieren
+        dt = pd.to_datetime(out.index.get_level_values(lvl), utc=True).normalize()
+        parts = [dt if n == lvl else out.index.get_level_values(n) for n in out.index.names]
+        out.index = pd.MultiIndex.from_arrays(parts, names=out.index.names)
+    else:
+        out.index = pd.to_datetime(out.index, utc=True).normalize()
+
+    out = out.sort_index()
+    if out.index.has_duplicates:
+        raise AssertionError("Duplikate im (normalisierten) Index.")
+    return out
+
 def normalize_datetime_index(df: pd.DataFrame) -> Tuple[pd.DataFrame, Optional[str]]:
     if isinstance(df.index, pd.DatetimeIndex):
         return df.sort_index(), None
@@ -86,12 +111,14 @@ def compare_year_splits_to_master(
     res.require(len(yf) > 0, "", f"{label}: keine Year-Parquets gefunden.", hard=False)
 
     m_norm, m_lvl = normalize_datetime_index(master)
+    m_norm = to_daily_utc_index(m_norm, m_lvl)
 
     for p in yf:
         year = int(p.stem)
         df = pd.read_parquet(p)
         try:
             df, lvl = normalize_datetime_index(df)
+            df = to_daily_utc_index(df, lvl)
         except Exception as e:
             res.errors.append(f"{label}/{year}: Konnte Index nicht normalisieren: {e}")
             res.ok = False

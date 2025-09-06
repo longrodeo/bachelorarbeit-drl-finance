@@ -63,7 +63,7 @@ pf = PortfolioLite(
 rec = AccountingRecorder(ROOT / "data" / "accounting_demo")
 
 # 2) Loop (5 Runden)
-for r in range(50):
+for r in range(10):
     t = dates[r]
     px_t  = panel.xs(t, level="date")
     # px_t1 = panel.xs(t1, level="date")
@@ -71,11 +71,11 @@ for r in range(50):
     # Dummy-Agent: rotiert zufällig durch Assets
     w_target = pd.Series(0.0, index=assets_order)
     if r % 2 == 0:
-        w_target.iloc[2] = 0.10   # alle 2 Runden ins erste Asset
-        w_target.iloc[3] = 0.30
+        w_target.iloc[2] = 0.50   # alle 2 Runden ins erste Asset
+        w_target.iloc[3] = 0.50
     else:
-        w_target.iloc[6] = 0.10   # sonst ins zweite Asset
-        w_target.iloc[0] = 0.10
+        w_target.iloc[2] = 0.50   # sonst ins zweite Asset
+        w_target.iloc[3] = 0.50
 
     cf = cash_factor(t)
     print(cf)

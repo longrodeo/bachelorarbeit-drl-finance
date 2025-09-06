@@ -8,7 +8,7 @@ import pandas as pd
 
 from utils.parquet_io import load_parquet, save_parquet
 from utils.paths import ROOT, CLEAN_DIR, CONFIG_DIR
-from validation.data_checks import normalize_datetime_index, slice_by_year
+from validation.check_cpcv_data import normalize_datetime_index, slice_by_year
 
 
 

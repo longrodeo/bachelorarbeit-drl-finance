@@ -23,7 +23,7 @@ class RewardSpec:
     kind: Literal["log", "icvar", "icvar_dd"] = "log"
     icvar_mode: Literal["ex_ante", "ex_post"] = "ex_ante"
     alpha: float = 0.05               # Tail-Level für (C)VaR
-    min_period: int = 4                 # Expanding-Fenster
+    min_period: int = 4                 # Expanding-Fenster für Training höher setzten
     lambda_: float = 1.0              # Gewicht ICVaR
     gamma: float = 1.0                # Gewicht ΔMDD (nur bei kind="icvar_dd")
     estimator: Literal["rolling"] = "rolling"
