@@ -71,8 +71,8 @@ for r in range(10):
     # Dummy-Agent: rotiert zufällig durch Assets
     w_target = pd.Series(0.0, index=assets_order)
     if r % 2 == 0:
-        w_target.iloc[2] = 0.50   # alle 2 Runden ins erste Asset
-        w_target.iloc[3] = 0.50
+        w_target.iloc[2] = 0.30   # alle 2 Runden ins erste Asset
+        w_target.iloc[3] = 0.40
     else:
         w_target.iloc[2] = 0.50   # sonst ins zweite Asset
         w_target.iloc[3] = 0.50

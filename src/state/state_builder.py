@@ -46,7 +46,7 @@ def build_state_for_date(
     panel_clean: pd.DataFrame,                 # MultiIndex (date, asset)
     date: pd.Timestamp,
     spec: StateSpec,
-    assets_order: List[str],                   # feste Asset-Reihenfolge (inkl. "CASH")
+    assets_order: List[str],                   # feste Asset-Reihenfolge
     portfolio_snapshot: Mapping[str, object],  # {"weights": Series|dict, "cash": float, "nav": float, "r_past" or "portfolio_return_prev": float}
     *,
     riskfree: float,
@@ -120,9 +120,9 @@ def build_state_for_date(
     g_weights = _vector_per_assets(portfolio_snapshot.get("weights"), assets_order, name="weights")
 
     # letzte Portfolio-Return-Info (Key tolerant)
-    last_ret = portfolio_snapshot.get("portfolio_return_prev", portfolio_snapshot.get("r_past"))
+    # last_ret = portfolio_snapshot.get("portfolio_return_prev", portfolio_snapshot.get("r_past"))
     cash_val = portfolio_snapshot.get("cash")
-    nav_val  = portfolio_snapshot.get("nav")
+    # nav_val  = portfolio_snapshot.get("nav")
 
 
     g_scalars_list: List[float] = []
@@ -134,9 +134,9 @@ def build_state_for_date(
         g_scalars_list.append(float(val))
         g_scalar_names.append(name)
 
-    _push(last_ret, "last_portfolio_return")
+    # _push(last_ret, "last_portfolio_return")
     _push(cash_val, "cash")
-    _push(nav_val, "nav")
+    # _push(nav_val, "nav")
     _push(riskfree, "riskfree_rate")
 
     g_scalars = np.asarray(g_scalars_list, dtype=float)  # [G]
