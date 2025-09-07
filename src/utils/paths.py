@@ -23,6 +23,7 @@ CLEAN_DIR.mkdir(parents=True, exist_ok=True)
 INTERIM_PANEL = (BASE_DIR / _paths.get("interim_panel", INTERIM_DIR / "panel.parquet")).resolve()
 CLEAN_PANEL   = (BASE_DIR / _paths.get("clean_panel",   CLEAN_DIR / "features_v1.parquet")).resolve()
 RISKFREE_FILE = (BASE_DIR / _paths.get("riskfree",      CLEAN_DIR / "riskfree.parquet")).resolve()
+RISKFREE_NORM_FILE = (BASE_DIR / _paths.get("riskfree",      CLEAN_DIR / "riskfree_norm.parquet")).resolve()
 MANIFEST_FILE = (BASE_DIR / _paths.get("manifest_clean", CLEAN_DIR / "_manifest.json")).resolve()
 
 def raw_asset_path(asset: str) -> Path:
@@ -108,8 +109,8 @@ SNAP_PATH    = ACCOUNT_DIR / "portfolio_snapshots.parquet"
 REWARD_PATH  = ACCOUNT_DIR / "rewards_log.parquet"
 
 # State-Specs
-SPEC_S0_YAML = CONFIG_DIR / "state_s0.yml"
-SPEC_S1_YAML = CONFIG_DIR / "state_s1.yml"
+SPEC_S0_YAML = CONFIG_DIR / "state_config" / "state0.yml"
+SPEC_S1_YAML = CONFIG_DIR / "state_config" / "state1.yml"
 
 # Output für Debug/Plots
 OUT_DIR      = DATA_DIR / "states_demo"

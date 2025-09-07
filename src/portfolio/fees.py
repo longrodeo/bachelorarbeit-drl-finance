@@ -10,7 +10,7 @@ def load_costs(costs_path: Path | str) -> Dict:
 def apply_fees(
     trades: pd.DataFrame,
     *,
-    commission_bps: float = 0.0,
+    commission_bps: float = 25,
     use_vol_slippage: bool = False,
     sigma_hl: Optional[pd.Series] = None,
     k_bps_per_sigma: float = 0.0,

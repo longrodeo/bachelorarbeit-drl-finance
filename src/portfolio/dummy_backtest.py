@@ -63,7 +63,7 @@ pf = PortfolioLite(
 rec = AccountingRecorder(ROOT / "data" / "accounting_demo")
 
 # 2) Loop (5 Runden)
-for r in range(10):
+for r in range(3):
     t = dates[r]
     px_t  = panel.xs(t, level="date")
     # px_t1 = panel.xs(t1, level="date")
@@ -74,11 +74,11 @@ for r in range(10):
         w_target.iloc[2] = 0.30   # alle 2 Runden ins erste Asset
         w_target.iloc[3] = 0.40
     else:
-        w_target.iloc[2] = 0.50   # sonst ins zweite Asset
+        w_target.iloc[2] = 0.10   # sonst ins zweite Asset
         w_target.iloc[3] = 0.50
 
     cf = cash_factor(t)
-    print(cf)
+
     if r >= 1:
         weights_post, info = pf.step(px_t1=px_t, w_target=w_target, cash_factor=cf)
 

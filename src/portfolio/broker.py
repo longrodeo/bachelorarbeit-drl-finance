@@ -168,6 +168,8 @@ class PortfolioLite:
         self.shares = (self.shares + exec_df["q"]).reindex(self.assets).fillna(0.0)
         self.value = self.cash + float((self.shares * adj_close).sum())
         self.weights = (self.shares * adj_close) / max(self.value, EPS)
+        w_cash_post = max(0.0, min(1.0, float(self.cash) / max(self.value, EPS)))
+        weights_with_cash = pd.concat([self.weights, pd.Series({"CASH": w_cash_post})])
 
         # --- Vol-Schätzer updaten (realized daily return, netto)
         try:
@@ -190,13 +192,15 @@ class PortfolioLite:
             "Ppre_open": Ppre,
             "w_open_pre": ((self.shares - exec_df["q"]) * adj_open) / max(Ppre, EPS),  # Gewichte direkt vor Ausführung
             "w_target": w,
+            "w_close_post_with_cash": weights_with_cash,  # Series: [A+1]
             "attempted_untradable_weight" : attempted_untradable,
             "controls": info_ctrl,  # acted, l1_distance, applied_scale, l1_step, ...
             "sigma_hat_daily": float(self.sigma_hat),
             "vol_targeting": bool(self.use_vol_targeting),
         }
+        self.weights_with_cash = weights_with_cash
 
 
 
-        return self.weights.copy(), info  # Reward berechnet die Env/der Loop
+        return self.weights_with_cash, info  # Reward berechnet die Env/der Loop
 
