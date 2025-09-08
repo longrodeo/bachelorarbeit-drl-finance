@@ -38,7 +38,7 @@ def _resolve_fred_api_key(passed: Optional[str] = None) -> str:
     str
         Gefundener API-Key.
     """
-    key = "d94ae2e1f33af6364d0754e50e7cb7b7"  # exemplarischer Platzhalter (nicht genutzt)
+    key = "Platzhalter"  # exemplarischer Platzhalter (nicht genutzt)
     # key = passed or os.environ.get("FRED_API_KEY") or os.environ.get("FRED_API_TOKEN") or os.environ.get("FRED_KEY")  # schrittweise Auflösung
     if not key:  # falls kein Key ermittelt wurde
         raise ValueError("FRED API Key fehlt. Setze FRED_API_KEY (oder übergib api_key=...).")  # eindeutige Fehlermeldung
