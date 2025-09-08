@@ -25,7 +25,7 @@ from src.utils.parquet_io import load_parquet, save_parquet
 from src.env.smoke_test_env import main as smoke_main
 
 # Recorder & Evaluator
-import src.accounting.recoder as recoder  # AccountingRecorder
+import src.accounting.recorder as recoder  # AccountingRecorder
 from src.accounting.evaluator import compute_rewards_from_snapshots
 from src.accounting.reward import RewardSpec
 

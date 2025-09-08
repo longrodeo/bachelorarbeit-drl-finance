@@ -20,22 +20,24 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.callbacks import EvalCallback
 
-# ---- Eure Projekt-Imports (ggf. Pfade anpassen) ------------------------------
+from src.rl.cnn_extractor import CNN1DExtractor
+
+
 from src.utils.paths import (
-    CLEAN_PANEL, RISKFREE_NORM_FILE, SPEC_S0_YAML, ACCOUNT_DIR,
+    FEATURES_NORM, RISKFREE_NORM_FILE, SPEC_S0_YAML as spec_features , ACCOUNT_DIR,
     get_asset_groups, get_assets_flat,
 )
-from src.utils.parquet_io import load_parquet
+from src.utils.parquet_io import load_parquet, save_parquet
 from src.state.state_builder import load_spec, build_state_for_date
 from src.env.trading_env import TradingEnv
-from src.accounting.recoder import AccountingRecorder
-from src.portfolio.broker import PortfolioLite  # <— Pfad ggf. anpassen
-from rl.wrapper import ActionMappingWrapper
+from src.accounting.recorder import AccountingRecorder
+from src.portfolio.broker import PortfolioLite
+from src.rl.wrapper import ActionMappingWrapper
 
 # -----------------------------------------------------------------------------
 
 def make_env(seed: int = 42, initial_cash: float = 1_000_000.0) -> gym.Env:
-    panel_clean = load_parquet(CLEAN_PANEL)
+    panel_clean = load_parquet(FEATURES_NORM)
     riskfree    = load_parquet(RISKFREE_NORM_FILE)
 
     dates  = panel_clean.index.get_level_values(0).unique().sort_values()
@@ -43,7 +45,7 @@ def make_env(seed: int = 42, initial_cash: float = 1_000_000.0) -> gym.Env:
     A = len(assets)
 
     rf_factor = riskfree["daily_factor_360"].reindex(dates).to_numpy()
-    spec = load_spec(SPEC_S0_YAML)
+    spec = load_spec(spec_features)
     state_builder = SimpleNamespace(build_state_for_date=build_state_for_date)
 
     portfolio = PortfolioLite(assets=assets, initial_cash=initial_cash)
@@ -81,12 +83,17 @@ def train(algo: str = "ppo",
     eval_env = DummyVecEnv([lambda: make_env(seed=seed + 123)])
 
     policy = "MultiInputPolicy"  # Dict-Observations: X, g_scalars, g_weights, position
+    policy_kwargs = dict(
+        features_extractor_class=CNN1DExtractor,
+        # optional: features_extractor_kwargs=dict(channels=X, kernel_size=Y, ...),
+    )
 
     if algo.lower() == "ppo":
         # Solide Startwerte; ggf. anpassen
         model = PPO(
             policy,
             env,
+            policy_kwargs=policy_kwargs,
             n_steps=1024,
             batch_size=256,
             gae_lambda=0.95,
@@ -102,6 +109,7 @@ def train(algo: str = "ppo",
         model = SAC(
             policy,
             env,
+            policy_kwargs=policy_kwargs,
             learning_rate=3e-4,
             buffer_size=500_000,
             batch_size=256,

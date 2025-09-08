@@ -3,7 +3,7 @@ from pathlib import Path
 
 from portfolio.broker import PortfolioLite
 import execution, fees
-from accounting.recoder import AccountingRecorder
+from accounting.recorder import AccountingRecorder
 from utils.parquet_io import load_parquet
 from src.features.riskfree_interest import daily_factor
 
