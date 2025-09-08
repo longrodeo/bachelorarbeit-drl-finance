@@ -8,6 +8,8 @@ from typing import Dict, Any, Optional
 import numpy as np
 import pandas as pd
 
+
+
 # ===== Schalter / Einstellungen ===============================================
 AUDIT_ASSET_INDEX: int = 0              # Welches Asset im t vs. t+1 Audit zeigen
 MAX_STEPS: Optional[int] = 10           # Anzahl Schritte begrenzen (None = volle Episode)
@@ -60,6 +62,7 @@ def main(INJECT: Dict[str, Any]) -> None:
     """
     # 1) Abhängigkeiten aus INJECT
     panel_clean   = _need(INJECT, "panel_clean")
+    panel_features = _need(INJECT, "panel_features")
     dates         = _opt(INJECT, "dates")
     assets        = _opt(INJECT, "assets")
     spec          = _need(INJECT, "spec")
@@ -93,6 +96,7 @@ def main(INJECT: Dict[str, Any]) -> None:
     from src.env.trading_env import TradingEnv
     env = TradingEnv(
         panel_clean=panel_clean,
+        panel_features=panel_features,
         dates=dates,
         assets=assets,
         spec=spec,
@@ -148,8 +152,8 @@ def main(INJECT: Dict[str, Any]) -> None:
     if A > 0:
         asset_idx = int(np.clip(AUDIT_ASSET_INDEX, 0, A - 1))
         asset = assets[asset_idx]
-        df_t  = panel_clean.xs(date_t,  level=0).loc[asset, spec.per_asset_features]
-        df_t1 = panel_clean.xs(date_t1, level=0).loc[asset, spec.per_asset_features]
+        df_t  = panel_features.xs(date_t,  level=0).loc[asset, spec.per_asset_features]
+        df_t1 = panel_features.xs(date_t1, level=0).loc[asset, spec.per_asset_features]
         print(f"[AUDIT] asset={asset}  t={date_t}  t+1={date_t1}")
         print("[AUDIT] features@t (erste 8):", dict(df_t.head(8)))
         print("[AUDIT] features@t+1 (erste 8):", dict(df_t1.head(8)))
@@ -168,7 +172,7 @@ def main(INJECT: Dict[str, Any]) -> None:
     max_steps = int(min(max_steps, (env.last_step - env.start_idx + 1)))
 
     did_exec_audit = False
-    last_info = info
+
 
     for k in range(max_steps):
         # WICHTIG: Trade-Datum (t+1) VOR dem step merken (vermeidet Off-by-one)
@@ -246,6 +250,7 @@ def main(INJECT: Dict[str, Any]) -> None:
                     print(f"[CHECK] rf_fac={rf_fac:.10f} cash_before_eff={cash_before:.2f} "
                           f"notional={notional:.2f} fees_total={fees_total:.2f} "
                           f"cash_after_calc={cash_after_calc:.2f} cash_info={cash_info:.2f} Δ={delta_cash:.4f}")
+
 
                     # --- Turnover-Rekonstruktion mit Toleranz (pre vs post Norm) ---
                     if getattr(env, "recorder", None) and getattr(env.recorder, "rows", None) and len(

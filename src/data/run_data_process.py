@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# Datei: src/daten_laden_und_umbauen.py
+# Datei: src/run_data_process.py
 # Zweck: Orchestriert die komplette Datenpipeline von RAW bis CLEAN inklusive
 #   Abruf der risikofreien Zinsserie und Manifest-Erstellung.
 # Hauptfunktion: ``main`` führt die einzelnen Stufen sequentiell aus.

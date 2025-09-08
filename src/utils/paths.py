@@ -104,8 +104,8 @@ ACCOUNT_DIR = DATA_DIR / "accounting_demo"
 CONFIG_DIR  = ROOT / "config"
 
 # Clean-Panel & Accounting-Outputs
-CLEAN_PATH   = FEATURES_ASSETS
-FEATURES_NORM = DATA_DIR / "clean" / "features_v1_vorm.parquet"
+CLEAN_PANEL  = FEATURES_ASSETS
+FEATURES_NORM = DATA_DIR / "clean" / "features_v1_norm.parquet"
 SNAP_PATH    = ACCOUNT_DIR / "portfolio_snapshots.parquet"
 REWARD_PATH  = ACCOUNT_DIR / "rewards_log.parquet"
 

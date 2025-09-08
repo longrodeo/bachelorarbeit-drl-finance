@@ -75,6 +75,7 @@ class CNN1DExtractor(BaseFeaturesExtractor):
     def forward(self, obs: Dict[str, th.Tensor]) -> th.Tensor:
         # X: (B, C, F, A) für Conv2d
         X = obs["X"].float()               # (B, C, F, A) → MultiInputPolicy liefert schon B-First
+        X = th.nan_to_num(X, nan=0.0)      # NaNs aus z. B. ETH vor Listing neutralisieren
         g_s = obs["g_scalars"].float()     # (B, S)
         g_w = obs["g_weights"].float()     # (B, A)
         pos = obs["position"].float()      # (B, A+1)

@@ -67,10 +67,28 @@ class PortfolioLite:
         attempted_untradable = float(w.where(~tradable, 0.0).sum())
         w = w.where(tradable, 0.0)  # verbieten statt umverteilen
 
+        #-----------------------------------------------------------
+        tradable = adj_open.notna()
+
+        attempted_untradable = float(w.where(~tradable, 0.0).sum())  # nur Logging/Stats
+        w = w.where(tradable, 0.0)  # verbieten statt umverteilen
+
+        # 1) Keine NaNs/Inf
+        assert np.isfinite(w.values).all(), "NaNs/Inf in Zielgewichten nach Maskierung"
+
+        # 2) Long-only invariant (sollte durch clip schon gelten)
+        assert (w.values >= -1e-12).all(), "Negative Gewichte nach Maskierung"
+
+        # 3) Summe <= 1 (Rest = Cash); obere Schranke greift unten
+
+
         # Budget-Schranke nur nach oben (Rest bleibt Cash)
         budget = float(w.sum())
         if budget > 1.0 + EPS:
             w = w / budget
+
+        # (optional) Log:
+        # self.logger.debug(f"masked_untradable={attempted_untradable:.6f}, budget={w.sum():.6f}")
 
         # Prev-Weights (auf gleiche Reihenfolge wie assets)
         w_prev = self.weights.reindex(self.assets).fillna(0.0)

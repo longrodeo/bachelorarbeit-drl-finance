@@ -1,9 +1,9 @@
 # src/features/make_features_norm.py
 import pandas as pd
 
-from utils.paths import CLEAN_PANEL, CLEAN_DIR, BASE_DIR
-from utils.parquet_io import load_parquet, save_parquet
-from features.obs_norm import rolling_zscore
+from src.utils.paths import CLEAN_PANEL, CLEAN_DIR, BASE_DIR
+from src.utils.parquet_io import load_parquet, save_parquet
+from src.features.obs_norm import rolling_zscore
 
 IN  = CLEAN_PANEL
 OUT = CLEAN_DIR / "features_v1_norm.parquet"

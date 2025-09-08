@@ -27,6 +27,7 @@ class TradingEnv(gym.Env):
         *,
         # --- Daten & State-Builder ---
         panel_clean: pd.DataFrame,      # MultiIndex (date, asset), enthält mind. adj_open/adj_close/spread...
+        panel_features: pd.DataFrame,
         dates: pd.DatetimeIndex,        # alle Handelstage (== level "date" im panel)
         assets: list[str],              # feste Asset-Reihenfolge
         spec: Any,                      # StateSpec für build_state_for_date
@@ -38,7 +39,7 @@ class TradingEnv(gym.Env):
 
         # --- Risk-free ---
         rf_factor: np.ndarray,          # [T] raw daily_factor (Cash-Accounting im Broker)
-        rf_rate: Optional[np.ndarray] = None,  # [T] tägliche Rate als Feature; None => rf_factor - 1
+        rf_rate: Optional[np.ndarray] = None,  # [T] Rate als Feature normalisiert; None => rf_factor - 1
 
         # --- Reward ---
         reward_kind: str = "log",       # "log" | "icvar" | "icvar_dd"
@@ -66,6 +67,7 @@ class TradingEnv(gym.Env):
 
         # ---------- Daten & Handles ----------
         self.panel = panel_clean
+        self.panel_features_norm = panel_clean if panel_features is None else panel_features  # fallback
         self.dates = pd.DatetimeIndex(dates)
         self.assets = list(assets)
         self.spec = spec
@@ -92,6 +94,10 @@ class TradingEnv(gym.Env):
 
         self.validate_actions = bool(validate_actions)
         self.eps = float(eps)
+
+        if self.panel_features_norm.index is not self.panel.index:
+            if not self.panel_features_norm.index.equals(self.panel.index):
+                raise ValueError("panel_features und panel_clean müssen denselben MultiIndex (date, asset) haben.")
 
         # ---------- Dimensionen ----------
         self.T = len(self.dates)      # #Zeitschritte
@@ -227,6 +233,7 @@ class TradingEnv(gym.Env):
         # 2) Preise/RF @ t+1
         date_t1 = self.dates[self.t + 1]
         px_t1 = self.panel.xs(date_t1, level=0)             # DataFrame mit adj_open/adj_close/...
+        px_t1 = px_t1.reindex(self.assets)                  # robust gegen „Asset fehlt vor Listing“
         cash_factor_t1 = float(self.RF_FACTOR[self.t + 1])   # raw daily_factor fürs Cash
 
         # 3) Broker/PortfolioLite: Ausführung & Kosten (Turnover/Fees/Spread IM BROKER)
@@ -369,7 +376,7 @@ class TradingEnv(gym.Env):
         w_assets = pd.Series(self.w_prev_full[:self.A], index=self.assets)
         rf_rate_t = float(self.RF_RATE[t])
         s = self.SB.build_state_for_date(
-            panel_clean=self.panel,
+            panel_clean=self.panel_features_norm,
             date=self.dates[t],
             spec=self.spec,
             assets_order=self.assets,

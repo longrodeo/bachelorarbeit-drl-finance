@@ -1,6 +1,5 @@
 from pathlib import Path
 import pandas as pd
-import numpy as np
 
 from utils.parquet_io import load_parquet, save_parquet
 from state.state_builder import load_spec, build_state_for_date  # YAML→StateSpec + Builder
@@ -11,7 +10,7 @@ HERE = Path(__file__).resolve()
 ROOT = HERE.parents[2]   # -> C:\Dev\Bachelorarbeit
 
 # Jetzt alle Pfade relativ zu ROOT
-CLEAN_PATH   = ROOT / "data" / "clean" / "features_v1.parquet"
+FEATURES_NORM   = ROOT / "data" / "clean" / "features_v1_norm.parquet"
 ACCOUNT_DIR  = ROOT / "data" / "accounting_demo"
 SNAP_PATH    = ACCOUNT_DIR / "portfolio_snapshots.parquet"
 REWARD_PATH  = ACCOUNT_DIR / "rewards_log.parquet"
@@ -19,7 +18,7 @@ SPEC_S0_YAML = ROOT / "config" / "state_config" / "state0.yml"
 SPEC_S1_YAML = ROOT / "config" / "state_config" / "state1.yml"
 OUT_DIR      = ROOT / "data" / "states" / "states_demo"
                            # Ausgabe-Ordner
-DATE_STR     = "2014-06-06"                                         # gewünschtes Datum (YYYY-MM-DD)
+DATE_STR     = "2014-06-16"                                         # gewünschtes Datum (YYYY-MM-DD)
 
 # === Helpers ===================================================================
 def to_long_raster(state: dict, state_name: str, date: pd.Timestamp) -> pd.DataFrame:
@@ -61,13 +60,13 @@ def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     # 1) Daten laden
-    panel = load_parquet(CLEAN_PATH)                       # MultiIndex (date, asset)
+    panel = load_parquet(FEATURES_NORM)                       # MultiIndex (date, asset)
     snaps = load_parquet(SNAP_PATH)
     rewards = load_parquet(REWARD_PATH)
-    rf = load_parquet(ROOT / "data" / "clean" / "riskfree.parquet")
+    rf = load_parquet(ROOT / "data" / "clean" / "riskfree_norm.parquet")
     rf.index = pd.to_datetime(rf.index).tz_localize(None).normalize()
     rf = rf.sort_index()
-    rf_series = rf["risk_free_annual"]
+    rf_series = rf["risk_free_annual_z"]
 
     # 2) Datum wählen
     t = pd.Timestamp(DATE_STR)

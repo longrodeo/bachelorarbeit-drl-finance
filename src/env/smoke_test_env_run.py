@@ -4,12 +4,13 @@ from pathlib import Path
 from datetime import datetime
 from types import SimpleNamespace
 
-from src.utils.paths import CLEAN_PANEL, RISKFREE_NORM_FILE, SPEC_S0_YAML, get_asset_groups, get_assets_flat
+from src.utils.paths import FEATURES_NORM, RISKFREE_NORM_FILE, SPEC_S0_YAML, get_asset_groups, get_assets_flat, CLEAN_PANEL
 from src.utils.parquet_io import load_parquet
 from src.env.smoke_test_env import main
 
 # --- 1) Laden über eure Helper ---
 panel_clean = load_parquet(CLEAN_PANEL)
+panel_features = load_parquet(FEATURES_NORM)
 riskfree    = load_parquet(RISKFREE_NORM_FILE)
 
 # Handelstage & Assets (stabile Reihenfolge aus der Config)
@@ -18,6 +19,7 @@ assets = get_assets_flat(get_asset_groups())
 
 # Cash-Faktor stumpf aus daily_factor (keine ifs)
 rf_factor = riskfree["daily_factor_360"].reindex(dates).to_numpy()
+rf_rate = riskfree["risk_free_annual_z"].reindex(dates).to_numpy()
 
 # --- 2) State-Spec laden & Builder „einpacken“ ---
 from src.state.state_builder import load_spec, build_state_for_date
@@ -46,12 +48,14 @@ recorder = ListRecorder()
 # --- 5) INJECT bauen und Smoke-Test fahren ---
 INJECT = {
     "panel_clean": panel_clean,
+    "panel_features": panel_features,
     "dates": dates,
     "assets": assets,
     "spec": spec,
     "state_builder": state_builder,   # Objekt mit build_state_for_date(...)
     "portfolio": portfolio,           # PortfolioLite-Instanz (hat reset/step)
     "rf_factor": rf_factor,           # roher daily_factor, gleich lang wie dates-Fenster
+    "rf_rate": rf_rate,
     "recorder": recorder,
     # "evaluator": evaluator, "reward_scaler": reward_scaler,
     "reward_kind": "log", "start_idx": 0, "end_idx_exclusive": len(dates),

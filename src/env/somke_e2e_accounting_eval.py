@@ -18,7 +18,7 @@ import numpy as np
 
 # --- Pfade/Helper laden -------------------------------------------------------
 from src.utils.paths import (
-    CLEAN_PANEL, RISKFREE_NORM_FILE, SPEC_S0_YAML, ACCOUNT_DIR,
+    CLEAN_PANEL, FEATURES_NORM, RISKFREE_NORM_FILE, SPEC_S0_YAML, ACCOUNT_DIR,
     get_asset_groups, get_assets_flat,
 )
 from src.utils.parquet_io import load_parquet, save_parquet
@@ -41,6 +41,7 @@ def run_env_and_record(account_dir: Path, steps: int = 10) -> None:
     """
     # 1) Daten laden
     panel_clean = load_parquet(CLEAN_PANEL)
+    panel_features = load_parquet(FEATURES_NORM)
     riskfree    = load_parquet(RISKFREE_NORM_FILE)
 
     # Handelstage & Assets (stabile Reihenfolge aus assets.yml / SPEC)
@@ -50,6 +51,7 @@ def run_env_and_record(account_dir: Path, steps: int = 10) -> None:
     # Riskfree: daily factor (z. B. "daily_factor_360")
     # → exakt wie im bestehenden Smoke-Runner genutzt
     rf_factor = riskfree["daily_factor_360"].reindex(dates).to_numpy()
+    rf_rate = riskfree["risk_free_annual_z"].reindex(dates).to_numpy()
 
     # 2) State-Spec + Builder
     spec = load_spec(SPEC_S0_YAML)
@@ -62,12 +64,14 @@ def run_env_and_record(account_dir: Path, steps: int = 10) -> None:
     # 4) INJECT & Run
     INJECT = {
         "panel_clean": panel_clean,
+        "panel_features": panel_features,
         "dates": dates,
         "assets": assets,
         "spec": spec,
         "state_builder": state_builder,
         "portfolio": portfolio,
         "rf_factor": rf_factor,
+        "rf_rate": rf_rate,
         "recorder": recorder,
         # Reward/Evaluator bei Bedarf:
         "reward_kind": "log",
