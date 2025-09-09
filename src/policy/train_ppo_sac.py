@@ -188,17 +188,15 @@ def train(algo: str = "ppo",
 
     # Policy (Dict-Obs)
     policy = "MultiInputPolicy"
-    policy_kwargs = dict(
-        features_extractor_class=CNN1DExtractor,
-        net_arch={"pi": [256, 128], "vf": [256, 128]},
-    )
 
     # Modell
     if algo.lower() == "ppo":
         model = PPO(
             policy,
             env,
-            policy_kwargs=policy_kwargs,
+            policy_kwargs=dict(
+            features_extractor_class=CNN1DExtractor,
+            net_arch={"pi": [256, 128], "vf": [256, 128]},),
             n_steps=4096,
             batch_size=256,
             n_epochs=10,
@@ -217,7 +215,9 @@ def train(algo: str = "ppo",
         model = SAC(
             policy,
             env,
-            policy_kwargs=policy_kwargs,
+            policy_kwargs=dict(
+            features_extractor_class=CNN1DExtractor,
+            net_arch={"pi": [256, 128], "qf": [256, 128]},),
             learning_rate=3e-4,
             buffer_size=500_000,
             batch_size=256,
