@@ -17,7 +17,7 @@ def apply_fees(
 ) -> pd.DataFrame:
     """
     Gebühren (bps auf Notional) + optional Vol-Slippage.
-    Erwartet trades mit Spalten: ['q','p_ref','p_exec','notional_abs','spread_cost'].
+    Erwartet trades mit Spalten: ['q','adj_close','p_exec','notional_abs','spread_cost'].
     """
     # Späteres To Do Spread Berechnung in apply_fees umziehen
     out = trades.copy()
@@ -29,9 +29,15 @@ def apply_fees(
     # optionale Vol-Slippage proportional zu sigma_hl
     if use_vol_slippage and sigma_hl is not None:
         vol_bps = float(k_bps_per_sigma) * sigma_hl.reindex(out.index).fillna(0.0)
-        out["vol_slip"] = (out["q"].abs() * out.get("p_ref", 0) *  (vol_bps / 1e4)).astype(float)
+        out["vol_slip"] = (out["q"].abs() * out.get("adj_close", 0) *  (vol_bps / 1e4)).astype(float)
     else:
         out["vol_slip"] = 0.0
 
     out["total_cost"] = out["fees"] + out["vol_slip"]
     return out
+
+# optional nicht in Verwendung, Erweiterung für spätere Forschungsarbeit
+
+def impact_rate_srl(sigma_bps, pov=0.02, Y=1.0):
+    # σ: z.B. Parkinson in bps; POV konstant klein annehmen POV = Q(Order-Notional)/ ADV(Average Dollar Volume)
+    return (Y * sigma_bps * (pov ** 0.5)) / 1e4  # rate (nicht mit turnover multiplizieren)

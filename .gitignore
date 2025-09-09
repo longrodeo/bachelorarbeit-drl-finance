@@ -8,7 +8,7 @@ __pycache__/
 
 # Datenordner (Roh- und Cleaned)
 data/raw/
-data/clean/
+
 
 # Externe Repos
 extern/

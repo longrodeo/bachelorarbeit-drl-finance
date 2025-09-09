@@ -6,9 +6,9 @@ from typing import Iterable, Dict, List, Literal
 
 import pandas as pd
 
-from utils.parquet_io import load_parquet, save_parquet
-from utils.paths import ROOT, CLEAN_DIR, CONFIG_DIR
-from validation.check_cpcv_data import normalize_datetime_index, slice_by_year
+from src.utils.parquet_io import load_parquet, save_parquet
+from src.utils.paths import ROOT, CLEAN_DIR, CONFIG_DIR
+from src.validation.check_cpcv_data import normalize_datetime_index, slice_by_year
 
 
 
@@ -31,16 +31,16 @@ def split_parquets_by_year(
     for y in years_cpcv:
         f = slice_by_year(feats, feats_date_lvl, y)
         r = slice_by_year(rf, rf_date_lvl, y)
-        p_f = out_cpcv_root/"features"/f"{y}.parquet"
-        p_r = out_cpcv_root/"riskfree"/f"{y}.parquet"
+        p_f = out_cpcv_root/"features"/f"features_{y}.parquet"
+        p_r = out_cpcv_root/"riskfree"/f"riskfree_{y}.parquet"
         save_parquet(f, p_f); save_parquet(r, p_r)
         created["cpcv_features"].append(p_f); created["cpcv_riskfree"].append(p_r)
 
     for y in years_wf:
         f = slice_by_year(feats, feats_date_lvl, y)
         r = slice_by_year(rf, rf_date_lvl, y)
-        p_f = out_wf_root/"features"/f"{y}.parquet"
-        p_r = out_wf_root/"riskfree"/f"{y}.parquet"
+        p_f = out_wf_root/"features"/f"features_{y}.parquet"
+        p_r = out_wf_root/"riskfree"/f"riskfree_{y}.parquet"
         save_parquet(f, p_f); save_parquet(r, p_r)
         created["wf_features"].append(p_f); created["wf_riskfree"].append(p_r)
 
@@ -92,13 +92,13 @@ def materialize_cpcv_paths_from_csv(
 
             created = {"training":{"features":[], "riskfree":[]}, "test":{"features":[], "riskfree":[]}}
             for y in train_years:
-                _mat(Path(years_features_dir)/f"{y}.parquet", trn_f/f"{y}.parquet", mode)
-                _mat(Path(years_riskfree_dir)/f"{y}.parquet", trn_r/f"{y}.parquet", mode)
+                _mat(Path(years_features_dir)/f"features_{y}.parquet", trn_f/f"features_{y}.parquet", mode)
+                _mat(Path(years_riskfree_dir)/f"riskfree_{y}.parquet", trn_r/f"riskfree_{y}.parquet", mode)
                 created["training"]["features"].append(trn_f/f"{y}.parquet")
                 created["training"]["riskfree"].append(trn_r/f"{y}.parquet")
             for y in test_years:
-                _mat(Path(years_features_dir)/f"{y}.parquet", tst_f/f"{y}.parquet", mode)
-                _mat(Path(years_riskfree_dir)/f"{y}.parquet", tst_r/f"{y}.parquet", mode)
+                _mat(Path(years_features_dir)/f"features_{y}.parquet", tst_f/f"features_{y}.parquet", mode)
+                _mat(Path(years_riskfree_dir)/f"riskfree_{y}.parquet", tst_r/f"riskfree_{y}.parquet", mode)
                 created["test"]["features"].append(tst_f/f"{y}.parquet")
                 created["test"]["riskfree"].append(tst_r/f"{y}.parquet")
 

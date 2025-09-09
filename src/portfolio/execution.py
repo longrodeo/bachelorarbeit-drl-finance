@@ -85,7 +85,7 @@ def apply_execution(
     orders: pd.DataFrame,
     *,
     order_col: str = "delta_shares",
-    ref_col: str = "execution_price_t_plus_1_open",
+    adj_open: str = "adj_open",
     spread_col: str = "bid_ask_spread_corwin_schultz",
     use_tplus1: bool = True,                 # falls du mal 'open' statt T+1 nutzt
     use_cs_spread: bool = True,
@@ -106,9 +106,9 @@ def apply_execution(
 
         # 2) Referenzpreis
         if use_tplus1:
-            p_ref_d = px_d[ref_col].reindex(q_d.index).astype(float)
+            adj_open = px_d[adj_open].reindex(q_d.index).astype(float)
         else:
-            p_ref_d = px_d["open"].reindex(q_d.index).astype(float)
+            adj_open = px_d["open"].reindex(q_d.index).astype(float)
 
         # 3) Spread-Quelle
         if use_cs_spread:
@@ -120,9 +120,8 @@ def apply_execution(
 
         # 4) Einheitliche Execution-Logik
         out_d = plan_execution_series(
-            q=q_d, p_ref=p_ref_d, spread=spread_d,
+            q=q_d, adj_open=adj_open, spread=spread_d,
             fixed_spread_bps=fixed_bps,
-            cash_assets={"CASH"},
         )
         out_d.index = pd.MultiIndex.from_product([[date], out_d.index], names=["date", "asset"])
         outs.append(out_d)

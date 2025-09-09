@@ -1,7 +1,7 @@
 source: tiingo          # Primärquelle (tiingo)
 interval: 1d            # Daily bars
 
-bar_type: time          # (später: dollar/volume/imbalance)
+bar_type: time
 prefer_intraday: false  # Intraday später anschließbar
 exec_price: open_next # Referenzpreis für T+1-Ausführung (alternativ: vwap_next)
 
