@@ -1,9 +1,17 @@
+# data/analysis
 pandas
 numpy
 pyyaml
-pyarrow          # Parquet-Unterstützung
-yfinance         # Daten-Downloader
+pyarrow
+fastparquet
+
+# calendars, io, test
 exchange_calendars
 pandas-market-calendars
-loguru           # Logging
+loguru
 pytest
+
+# RL stack
+gymnasium==0.29.1
+shimmy>=1.3
+stable-baselines3==2.7.0
