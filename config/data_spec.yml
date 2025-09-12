@@ -19,10 +19,9 @@ fields:                 # Rohfelder, die wir aus der API holen
   - high
   - low
   - close
+  - adj_open
   - adj_close
   - volume
-  - dividends
-  - stock_splits
 
 paths:
   raw_dir: data/raw

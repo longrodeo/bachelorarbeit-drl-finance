@@ -23,7 +23,7 @@ CLEAN_DIR.mkdir(parents=True, exist_ok=True)
 INTERIM_PANEL = (BASE_DIR / _paths.get("interim_panel", INTERIM_DIR / "panel.parquet")).resolve()
 FEATURES_ASSETS   = (BASE_DIR / _paths.get("clean_panel",   CLEAN_DIR / "features_v1.parquet")).resolve()
 RISKFREE_FILE = (BASE_DIR / _paths.get("riskfree",      CLEAN_DIR / "riskfree.parquet")).resolve()
-RISKFREE_NORM_FILE = (BASE_DIR / _paths.get("riskfree",      CLEAN_DIR / "riskfree_norm.parquet")).resolve()
+RISKFREE_RAW_FILE = (BASE_DIR / _paths.get("riskfree",      RAW_DIR / "riskfree_raw.parquet")).resolve()
 MANIFEST_FILE = (BASE_DIR / _paths.get("manifest_clean", CLEAN_DIR / "_manifest.json")).resolve()
 
 def raw_asset_path(asset: str) -> Path:
@@ -105,7 +105,7 @@ CONFIG_DIR  = ROOT / "config"
 
 # Clean-Panel & Accounting-Outputs
 CLEAN_PANEL  = FEATURES_ASSETS
-FEATURES_NORM = DATA_DIR / "clean" / "features_v1_norm.parquet"
+FEATURES_NORM = DATA_DIR / "clean" / "features_v1_raw_z.parquet"
 SNAP_PATH    = ACCOUNT_DIR / "portfolio_snapshots.parquet"
 REWARD_PATH  = ACCOUNT_DIR / "rewards_log.parquet"
 

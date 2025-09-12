@@ -4,7 +4,7 @@ import numpy as np
 def no_trade_band(
     weights_prev: np.ndarray,
     weights_target: np.ndarray,
-    min_change_l1: float = 0.03
+    min_change_l1: float
 ) -> Tuple[np.ndarray, float]:
     """
     Rebalancing erst ab einer spürbaren Zieländerung.
@@ -25,7 +25,7 @@ def no_trade_band(
         raise ValueError("weights_prev und weights_target müssen die gleiche Form haben")
 
     l1_distance = float(np.abs(weights_target - weights_prev).sum())
-    if l1_distance > min_change_l1:
+    if l1_distance >= min_change_l1:
         return weights_target, l1_distance  # handeln
     else:
         return weights_prev, l1_distance    # nichts tun
@@ -34,7 +34,7 @@ def no_trade_band(
 def apply_turnover_cap(
     weights_prev: np.ndarray,
     weights_target: np.ndarray,
-    max_step_l1: float = 0.30,
+    max_step_l1: float,
     eps: float = 1e-12
 ) -> Tuple[np.ndarray, float, float]:
     """
@@ -72,6 +72,17 @@ def apply_turnover_cap(
     # numerische Sanity: Simplex sichern
     weights_exec = np.maximum(weights_exec, 0.0)
 
+    #-----Debug Prints------
+    #print(f"round")
+    #print(f"target {weights_target}")
+    #print(f"prev {weights_prev}")
+    #print(f"diff {diff}")
+    #print(f"request {l1_requested}")
+    #print(f"scaled diff {applied_scale * diff}")
+    #print(f"prev-exce{weights_exec-weights_prev}")
+    #print(f"exec {weights_exec}")
+    #-----------------------------------------------
+
     # Budget-Pfad einhalten (nur nach unten begrenzen, kein Hochskalieren -> Cash bleibt Cash)
     s_prev = float(weights_prev.sum())
     s_tgt  = float(weights_target.sum())
@@ -89,8 +100,8 @@ def apply_turnover_cap(
 def apply_execution_controls(
     weights_prev: np.ndarray,
     weights_target: np.ndarray,
-    min_change_l1: float = 0.03,
-    max_step_l1: float = 0.20,
+    min_change_l1: float,
+    max_step_l1: float,
 ) -> Tuple[np.ndarray, dict[str, float]]:
     """
     Pipeline: zuerst No-Trade-Band, dann Turnover-Cap.

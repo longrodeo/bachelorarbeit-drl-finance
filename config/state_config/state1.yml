@@ -2,32 +2,32 @@
 name: S1
 per_asset_features:
   # S0:
-  - open
-  - high
-  - low
-  - close
-  - volume
-  - daily_return_log
-  - volatility_becker_parkinson
-  - bid_ask_spread_corwin_schultz
+  - open_z
+  - high_z
+  - low_z
+  - close_z
+  - volume_z
+  - daily_return_log_z
+  - volatility_becker_parkinson_z
+  - bid_ask_spread_corwin_schultz_z
   # + TA-Features:
-  - simple_moving_average_20
-  - simple_moving_average_60
-  - exponential_moving_average_12
-  - exponential_moving_average_26
-  - relative_strength_index_14
-  - macd_line_12_26_9
-  - macd_signal_12_26_9
-  - macd_histogram_12_26_9
-  - bollinger_middle_band_20_2.0
-  - bollinger_upper_band_20_2.0
-  - bollinger_lower_band_20_2.0
-  - bollinger_bandwidth_20_2.0
-  - commodity_channel_index_20
-  - average_directional_index_14
-  - positive_directional_index_14
-  - negative_directional_index_14
-  - average_dollar_volume_20    # Liquidity-Feature; optional nach S0 verschiebbar
+  - simple_moving_average_20_z
+  - simple_moving_average_60_z
+  - exponential_moving_average_12_z
+  - exponential_moving_average_26_z
+  - relative_strength_index_14_z
+  - macd_line_12_26_9_z
+  - macd_signal_12_26_9_z
+  - macd_histogram_12_26_9_z
+  - bollinger_middle_band_20_2.0_z
+  - bollinger_upper_band_20_2.0_z
+  - bollinger_lower_band_20_2.0_z
+  - bollinger_bandwidth_20_2.0_z
+  - commodity_channel_index_20_z
+  - average_directional_index_14_z
+  - positive_directional_index_14_z
+  - negative_directional_index_14_z
+  - average_dollar_volume_20_z    # Liquidity-Feature; optional nach S0 verschiebbar
 
 add_mask_channel: true
 output_format: torch_nchw

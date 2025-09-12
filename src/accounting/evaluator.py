@@ -180,3 +180,90 @@ def compute_rewards_from_snapshots(
     # 8) Persistieren
     save_parquet(out, accounting_dir / out_name)
     return out
+
+# --- OnlineEvaluator: läuft ohne Recorder/Parquet ----------------------------
+
+class OnlineEvaluator:
+    """
+    Minimaler Online-Evaluator für Test-Episoden ohne Recorder.
+    Füttern mit NAV_t und r_log_t (falls r_log nicht gegeben, aus NAV ableiten).
+    Am Ende: gleiche Größen wie compute_rewards_from_snapshots, aber im RAM.
+    """
+    def __init__(self, *, kind: str = "log",
+                 alpha: float = 0.05, min_period: int = 1,
+                 icvar_mode: str = "ex_post", ewm_alpha: float | None = None,
+                 lambda_: float = 1.0, gamma: float = 0.0):
+        self.kind = str(kind)
+        self.alpha = float(alpha)
+        self.min_period = int(min_period)
+        self.icvar_mode = str(icvar_mode)
+        self.ewm_alpha = ewm_alpha if ewm_alpha is None else float(ewm_alpha)
+        self.lambda_ = float(lambda_)
+        self.gamma = float(gamma)
+        self._nav = []   # NAV_t
+        self._r = []     # r_log_t
+
+    def update(self, *, nav_t: float | None = None, r_log_t: float | None = None):
+        if (nav_t is None) and (r_log_t is None):
+            return
+        if nav_t is not None:
+            self._nav.append(float(nav_t))
+            # Wenn r nicht explizit kommt, aus NAV ableiten (additiv):
+            if r_log_t is None and len(self._nav) >= 2:
+                a, b = self._nav[-2], self._nav[-1]
+                r_log_t = float(np.log(max(b, EPS) / max(a, EPS)))
+        if r_log_t is not None:
+            self._r.append(float(r_log_t))
+
+    def finalize(self) -> pd.DataFrame:
+        nav = pd.Series(self._nav, name="nav_t").reset_index(drop=True)
+        # r-Serie: n-1 Einträge (ab 2. NAV), deckt sich mit Snapshot-Logik
+        if len(self._r) == len(nav):
+            r = pd.Series(self._r)
+        else:
+            r = pd.Series(self._r[:max(0, len(nav)-1)])
+        base = pd.DataFrame({
+            "nav_t": nav,
+            "nav_t-1": nav.shift(1),
+        })
+        base["r_log_t"] = r.reindex(base.index).astype(float)
+
+        # (I)CVaR nach Spec
+        if self.kind in ("icvar", "icvar_dd"):
+            include_current = (self.icvar_mode.lower() == "ex_post")
+            var_s, cvar_s, icvar_s = mts_var_cvar_icvar(
+                base["r_log_t"],
+                alpha=self.alpha,
+                min_period=self.min_period,
+                include_current=include_current,
+                ewm_alpha=self.ewm_alpha,
+                as_series=True
+            )
+            base["var_t"] = var_s
+            base["cvar_t"] = cvar_s
+            base["cvar_tminus1"] = base["cvar_t"].shift(1)
+            base["icvar_t"] = icvar_s.fillna(0.0)
+        else:
+            base["icvar_t"] = 0.0
+
+        # ΔMDD (nur icvar_dd)
+        if self.kind == "icvar_dd":
+            mdd_t  = _mdd_series(base["nav_t-1"].ffill())
+            mdd_t1 = _mdd_series(base["nav_t"].ffill())
+            base["delta_mdd_t"] = (mdd_t1 - mdd_t).clip(lower=0.0).fillna(0.0)
+        else:
+            base["delta_mdd_t"] = 0.0
+
+        # Reward
+        if self.kind == "log":
+            base["reward_t"] = base["r_log_t"]
+        elif self.kind == "icvar":
+            base["reward_t"] = base["r_log_t"] - self.lambda_ * base["icvar_t"]
+        elif self.kind == "icvar_dd":
+            base["reward_t"] = base["r_log_t"] - self.lambda_ * base["icvar_t"] - self.gamma * base["delta_mdd_t"]
+        else:
+            raise ValueError(f"Unbekannte Reward-Variante: {self.kind}")
+
+        out = base.dropna(subset=["nav_t-1"]).reset_index(drop=True)
+        return out
+

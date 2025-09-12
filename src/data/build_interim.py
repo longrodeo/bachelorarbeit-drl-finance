@@ -27,12 +27,13 @@ from src.utils.parquet_io import load_parquet, save_parquet  # Parquet-Ein-/Ausg
 # Mapping Provider → kanonisch (nur in INTERIM anwenden)
 PROVIDER_TO_CANONICAL = {
     "adjclose": "adj_close",  # Adjusted Close
+    "adjopen": "adj_open", # Adjusted Open
     "divcash": "dividends",  # Dividendenzahlungen
     "splitfactor": "stock_splits",  # Aktiensplits
 }
 
 DEFAULT_SPEC: Dict[str, object] = {
-    "fields": ["open", "high", "low", "close", "adj_close", "volume", "dividends", "stock_splits"],  # Standardspalten
+    "fields": ["open", "high", "low", "close", "adj_open", "adj_close", "volume", "dividends", "stock_splits"],  # Standardspalten
     "require_base_fields": True,  # Basisspalten müssen vorhanden sein
     "base_fields": ["open", "high", "low", "close"],  # definierte OHLC-Spalten
     "calendar": "XNYS",  # Standardkalender: NYSE
@@ -65,7 +66,6 @@ def build_interim_prices(
     end: str,  # Enddatum des Betrachtungsfensters
     spec: Optional[dict] = None,  # optionale Konfigurationsüberschreibung
     crypto_assets: Optional[Set[str]] = None,  # Menge an Krypto-Tickern
-    sessions: Optional[pd.DatetimeIndex] = None,  # vorberechneter Kalender
     save: bool = True,  # Ergebnis schreiben?
 ) -> pd.DataFrame:  # Rückgabe: Panel-DataFrame
     """RAW-Parquets zu einem kalendarisch ausgerichteten Panel kombinieren.
@@ -131,6 +131,8 @@ def build_interim_prices(
         # sinnvolle Defaults nur falls in fields verlangt
         if "adj_close" in fields and "adj_close" not in df.columns and "close" in df.columns:
             df["adj_close"] = df["close"]  # Fallback: adj_close = close
+        if "adj_open" in fields and "adj_open" not in df.columns and "open" in df.columns:
+            df["adj_open"] = df["open"]
         if "dividends" in fields and "dividends" not in df.columns:
             df["dividends"] = 0.0  # fehlende Dividenden auffüllen
         if "stock_splits" in fields and "stock_splits" not in df.columns:

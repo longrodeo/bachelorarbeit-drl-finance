@@ -62,6 +62,7 @@ class TradingEnv(gym.Env):
         # --- Sonstiges ---
         validate_actions: bool = False,  # Notfall-Schutz (Policy hat Softmax → meist False)
         eps: float = 1e-12,
+        warmup_days: int = 20,
     ):
         super().__init__()
 
@@ -94,6 +95,7 @@ class TradingEnv(gym.Env):
 
         self.validate_actions = bool(validate_actions)
         self.eps = float(eps)
+        self.warmup_days = int(warmup_days)
 
         if self.panel_features_norm.index is not self.panel.index:
             if not self.panel_features_norm.index.equals(self.panel.index):
@@ -102,6 +104,13 @@ class TradingEnv(gym.Env):
         # ---------- Dimensionen ----------
         self.T = len(self.dates)      # #Zeitschritte
         self.A = len(self.assets)     # #Assets
+
+        # Per-Jahr-Zähler: 0,1,2,… (reset bei Jahreswechsel)
+        _years = pd.DataFrame({"year": self.dates.year})
+        self.age_in_year = _years.groupby("year").cumcount().to_numpy()
+        self.warmup_days = int(warmup_days)
+
+
         assert self.RF_FACTOR.shape[0] == self.T, "rf_factor Länge muss T entsprechen."
         if self.RF_RATE.shape[0] != self.T:
             raise ValueError("rf_rate/rf_factor-Längen passen nicht zu 'dates'.")
@@ -191,7 +200,7 @@ class TradingEnv(gym.Env):
             shares0 = getattr(self.portfolio, "shares", pd.Series(0.0, index=self.assets))
             zeros_exec = pd.DataFrame(
                 0.0, index=self.assets,
-                columns=["q", "p_ref", "p_exec", "notional_abs", "spread_cost"]
+                columns=["q", "adj_open", "p_exec", "notional_abs", "spread_cost"]
             )
             zeros_fees = pd.DataFrame(
                 0.0, index=self.assets,
@@ -230,15 +239,25 @@ class TradingEnv(gym.Env):
             a = (np.r_[np.zeros(self.A), 1.0] if s <= self.eps else a / s)
         w_target_assets = pd.Series(a[:self.A], index=self.assets)  # Broker erwartet Assets-only
 
+        # 1a) WARMUP-GATING (keine Trades in den ersten 'warmup_days' pro Jahr)
+        age_t1 = int(self.age_in_year[min(self.t + 1, self.T - 1)])
+        gated = age_t1 < self.warmup_days
+        if gated:
+            w_target_assets.loc[:] = 0.0
+
+        # print(f"[DBG] t={self.t} age(t+1)={age_t1}/{self.warmup_days} gated={gated} preL1={abs(a[:self.A]).sum():.3f}")
+
         # 2) Preise/RF @ t+1
+        date_t = self.dates[self.t]
         date_t1 = self.dates[self.t + 1]
+        px_t = self.panel.xs(date_t, level=0)
         px_t1 = self.panel.xs(date_t1, level=0)             # DataFrame mit adj_open/adj_close/...
         px_t1 = px_t1.reindex(self.assets)                  # robust gegen „Asset fehlt vor Listing“
         cash_factor_t1 = float(self.RF_FACTOR[self.t + 1])   # raw daily_factor fürs Cash
 
         # 3) Broker/PortfolioLite: Ausführung & Kosten (Turnover/Fees/Spread IM BROKER)
         # >>> Anpassen, falls deine Signatur anders ist:
-        w_series_post, info = self.portfolio.step(
+        w_series_post, info = self.portfolio.step(px_t=px_t,
             px_t1=px_t1,
             w_target=w_target_assets,
             cash_factor=cash_factor_t1,
@@ -302,6 +321,10 @@ class TradingEnv(gym.Env):
 
         reward = r_raw if (self.reward_scaler is None) else float(self.reward_scaler.update(r_raw))
 
+        # 5a) WARMUP-REWARD: kein Lernsignal während Warmup
+        if gated:
+            reward = 0.0
+
         # 6) Recorder (optional)
         if self.recorder is not None:
             try:
@@ -332,17 +355,21 @@ class TradingEnv(gym.Env):
         terminated = bool(self.value <= 0.0)       # Insolvenz
         truncated = bool(self.t > self.last_step)  # kein weiteres t+1
 
+        controls = (info.get("controls", {}) or {}).copy()
+        controls.update({"gated_warmup": gated, "age_t1": age_t1, "warmup_days": self.warmup_days})
+
         info_out = self._info(
-            fees=float(info.get("fees", 0.0)),
-            turnover=float(info.get("controls", {}).get("l1_step", np.nan)),
+            fees=(info.get("fees", 0.0)),
+            turnover=float(controls.get("l1_exec", controls.get("l1_step", 0.0))),
             ret_raw=float(ret_raw),
             r_log=float(r_log),
             reward=float(reward),
             cash_weight=float(cash_weight_post),
             trades=info.get("trades"),
             fees_detail=info.get("fees_detail"),
-            controls=info.get("controls"),
+            controls=controls,
             exec_date=date_t1,
+
         )
         return obs_next, reward, terminated, truncated, info_out
 

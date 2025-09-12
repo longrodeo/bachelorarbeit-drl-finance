@@ -1,14 +1,13 @@
 # ---------------------------------------------------------------------------
 # Datei: src/data/build_clean.py
-# Zweck: Kombiniert das INTERIM-Panel mit technischen Indikatoren und einem
-#   synthetischen risikofreien Asset ("CASH"). Ergebnis ist die CLEAN-Stufe.
+# Zweck: Kombiniert das INTERIM-Panel mit technischen Indikatoren. Ergebnis ist die CLEAN-Stufe.
 # Hauptfunktionen: ``_build_cash_asset`` erzeugt das Kunst-Asset, ``build_clean_data``
 #   berechnet Features und vereinigt alles, ``write_clean_manifest`` schreibt
 #   Metadaten.
 # Ein-/Ausgabe: MultiIndex-Panel ``(date, asset)`` → erweitertes Feature-Panel
 #   sowie optionale Parquet/Manifest-Dateien.
 # Abhängigkeiten: ``pandas``, ``numpy`` sowie eigene Feature-Module; Stolpersteine
-#   sind falsche Datentypen oder bereits vorhandenes CASH-Asset.
+#   sind falsche Datentypen.
 # ---------------------------------------------------------------------------
 """
 Erzeugt das finale Feature-Panel (CLEAN) inklusive synthetischem CASH-Asset.
@@ -18,13 +17,12 @@ zu eigenen Feature-Modulen. Typische Fehler: falsche Datentypen oder bereits
 vorhandenes CASH-Asset im Input.
 """
 
-# ``from __future__`` erlaubt spätere Typreferenzen ohne String-Literale
+# `from __future__`` erlaubt spätere Typreferenzen ohne String-Literale
 from __future__ import annotations
-# ``Optional``-Alias für optionale Parameter bei Manifest/Output-Pfaden
+# `Optional``-Alias für optionale Parameter bei Manifest/Output-Pfaden
 from typing import Optional, Hashable
 # Metainformationen über Python-Version usw. für Manifest
 import platform  # Versionsinfo fürs Manifest
-import numpy as np  # numerische Operationen
 import pandas as pd  # Datenverarbeitung
 from pathlib import Path  # Pfad-Manipulation
 
@@ -32,7 +30,7 @@ from pathlib import Path  # Pfad-Manipulation
 # Stabiler Parquet-Schreiber mit Engine-Fallbacks
 from src.utils.parquet_io import save_parquet  # stabiler IO-Wrapper
 # Manifest-Helfer für Prüfsummen und Commit-Referenzen
-from utils.manifest import write_manifest, file_summary, current_commit_short  # Manifest-Helfer
+from src.utils.manifest import write_manifest, file_summary, current_commit_short  # Manifest-Helfer
 
 # Feature-Funktionen aus euren Modulen
 from src.features.basic_indicator import (
@@ -59,47 +57,20 @@ from src.features.technical_indicators import (
 def _downcast_feature_dtypes(df: pd.DataFrame) -> pd.DataFrame:
     """Speicherfreundliche Datentypen für Feature-Spalten setzen."""
     for c in df.columns:  # jede Spalte einzeln prüfen
-        if c == "is_cash":
-            df[c] = df[c].astype("int8")  # Flag benötigt nur wenige Bits
-        elif pd.api.types.is_float_dtype(df[c]):
+        if pd.api.types.is_float_dtype(df[c]):
             df[c] = df[c].astype("float32")  # Float‑Features auf 32 Bit
         elif pd.api.types.is_integer_dtype(df[c]):
             df[c] = df[c].astype("int64")  # int64 für Mengen/Volumen
     return df  # DataFrame mit optimierten Datentypen zurückgeben
 
-def open_adj(open_s: pd.Series, close_s: pd.Series, adj_close_s: pd.Series) -> pd.Series:
-    """
-    Berechnet adj_open = open * (adj_close/close) auf Serienbasis.
-    Index-kompatibel (gleiche Dates) und robust gegen NaNs/Inf.
-    """
-    scale = (adj_close_s.astype(float) / close_s.astype(float)).replace([np.inf, -np.inf], np.nan)
-    scale = scale.where(scale > 0).fillna(1.0)  # Guards: keine negativen/NaN-Skalen
-    return (open_s.astype(float) * scale).astype(float)
-
-
 def _fmt_label(k: Hashable) -> str:
     return "/".join(map(str, k)) if isinstance(k, tuple) else str(k)
-
-
-def _check_open_adj_invariants(px: pd.DataFrame, asset: Hashable, tol: float = 1e-6) -> None:
-    name = _fmt_label(asset)
-    r1 = (px["adj_open"] / px["adj_close"]).astype(float)
-    r2 = (px["open"]     / px["close"]).astype(float)
-    m = (r1 - r2).abs().median(skipna=True)
-    if pd.notna(m) and m > tol:
-        print(f"[adj_open CHECK] {name}: median|Δ|={m:.2e} "
-              f"(med adj_open/adj_close={r1.median(skipna=True):.4f}, med open/close={r2.median(skipna=True):.4f})")
-    scale = (px["adj_close"] / px["close"]).astype(float)
-    bad = (~np.isfinite(scale)) | (scale <= 0)
-    if bad.any():
-        print(f"[adj_open CHECK] {name}: {int(bad.sum())} invalide scale-Werte.")
 
 
 def build_clean_data(
     prices: pd.DataFrame,
     out_path: Optional[str] = None,
     cs_sample_length: int = 2, # Corwin–Schultz: Spanne (typisch 1–2)
-    verify: bool = True,
  ) -> pd.DataFrame:
     """Feature-Panel mit technischen Kennzahlen und CASH-Asset erzeugen.
 
@@ -111,8 +82,6 @@ def build_clean_data(
         Jahreszins pro Tag (dezimal, bereits auf Sessions ausgerichtet).
     out_path : str | None
         Optionaler Speicherpfad.
-    cash_symbol : str
-        Tickersymbol für das synthetische Cash.
     cs_sample_length : int
         Fenster für Corwin–Schultz-Spread-Schätzung.
 
@@ -134,7 +103,6 @@ def build_clean_data(
         px = df_asset.droplevel("asset").sort_index()  # reine Ein-Asset-Serie
 
         # Core-Features
-        adj_open = open_adj(px["open"], px["close"], px["adj_close"])
         daily_ret = returns(px["adj_close"], kind="log")  # logarithmische Renditen
         adv20 = average_dollar_volume(px["close"], px["volume"], window=20)  # Liquidität
 
@@ -174,11 +142,6 @@ def build_clean_data(
         cci20 = commodity_channel_index(px["high"], px["low"], px["close"], 20)
         adx_df = average_directional_index(px["high"], px["low"], px["close"], 14)
 
-        px_check = px[["open", "close", "adj_close"]].copy()
-        px_check["adj_open"] = adj_open
-        if verify:  # neuer Funktionsparameter von build_clean_data(...)
-            _check_open_adj_invariants(px_check, asset)
-
         features = pd.DataFrame(
             {
                 # Rohschema
@@ -186,7 +149,7 @@ def build_clean_data(
                 "high": px["high"],  # Tageshoch
                 "low": px["low"],    # Tagestief
                 "close": px["close"],  # Schlusskurs
-                "adj_open": adj_open, # bereinigter Kurs
+                "adj_open": px["adj_open"], # bereinigter Kurs
                 "adj_close": px["adj_close"],  # bereinigter Kurs
                 "volume": px["volume"].astype("float64"),  # Handelsvolumen
                 "dividends": px["dividends"],  # ausgezahlte Dividenden
@@ -215,17 +178,23 @@ def build_clean_data(
                 "average_directional_index_14": adx_df["adx_14"],
                 "positive_directional_index_14": adx_df["plus_di_14"],
                 "negative_directional_index_14": adx_df["minus_di_14"],
-
-                # Exec/Flag
-                "is_cash": 0,
             },
             index=px.index,
         )
-        features["asset"] = asset  # Asset-Kennung hinzufügen
-        frames.append(features.reset_index().set_index(["date", "asset"]))  # wieder MultiIndex
+        features.index.name = "date"
+        features = features.assign(asset=asset)  # Spalte hinzufügen
+        features = features.set_index("asset", append=True)
+        frames.append(features)  # MultiIndex: (date, asset)
+
+    normed = []
+    for f in frames:
+        if isinstance(f, pd.Series):
+            normed.append(f.to_frame(f.name or "value"))
+        else:
+            normed.append(f)
 
     # --- Zusammenführen, Finalisieren ---
-    panel = pd.concat(frames).sort_index()  # alles zusammenführen
+    panel = pd.concat(normed).sort_index()  # alles zusammenführen
     panel = panel[~panel.index.duplicated(keep="last")]  # doppelte Zeilen entfernen
     panel = _downcast_feature_dtypes(panel)  # Datentypen optimieren
 
@@ -267,7 +236,6 @@ def write_clean_manifest(
             "windows": spec.get("windows", {}),
             "cs": spec.get("cs", {}),
             "risk_free": spec.get("risk_free", {}),
-            "cash": spec.get("cash", {"symbol": "CASH"}),
         },
         "inputs": [file_summary(str(interim_path)), file_summary(str(macro_path))],  # Quellen
         "outputs": [file_summary(str(out_path))],  # erzeugte Dateien

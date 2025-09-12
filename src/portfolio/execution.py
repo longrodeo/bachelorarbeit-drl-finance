@@ -47,7 +47,7 @@ def plan_execution_series(
     - keine I/O, keine Seiteneffekte -> deterministisch reproduzierbar.
 
     Rückgabe-Spalten je Asset:
-      ["q", "p_ref", "p_exec", "notional_abs", "spread_cost"]
+      ["q", "adj_open", "p_exec", "notional_abs", "spread_cost"]
     """
     idx = q.index
     q = _as_series(q, idx).astype(float)

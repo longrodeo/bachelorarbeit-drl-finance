@@ -10,7 +10,7 @@ import numpy as np
 
 # Falls dein Mapping bereits in src/policy/action_mapping.py liegt, importiere es von dort:
 try:
-    from src.policy.action_mapping import action_to_weights_softmax  # deine Version
+    from rl.action_mapping import action_to_weights_softmax  # deine Version
 except Exception:
     # Fallback: direkte Kopie der Funktion (wie von dir geliefert)
     def action_to_weights_softmax(a: np.ndarray, eps: float = 1e-12) -> np.ndarray:

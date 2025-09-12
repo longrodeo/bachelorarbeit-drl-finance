@@ -4,22 +4,22 @@ from pathlib import Path
 from datetime import datetime
 from types import SimpleNamespace
 
-from src.utils.paths import FEATURES_NORM, RISKFREE_NORM_FILE, SPEC_S0_YAML, get_asset_groups, get_assets_flat, CLEAN_PANEL
-from src.utils.parquet_io import load_parquet
+from src.utils.paths import SPEC_S0_YAML
 from src.env.smoke_test_env import main
+from src.data.load_panel_years import load_panel_years
 
-# --- 1) Laden über eure Helper ---
-panel_clean = load_parquet(CLEAN_PANEL)
-panel_features = load_parquet(FEATURES_NORM)
-riskfree    = load_parquet(RISKFREE_NORM_FILE)
+# — wähle 1–2 Jahre für den Smoke —
+panel = load_panel_years([2015, 2016])
+panel_clean = panel_features = panel
 
-# Handelstage & Assets (stabile Reihenfolge aus der Config)
-dates  = panel_clean.index.get_level_values(0).unique().sort_values()
-assets = get_assets_flat(get_asset_groups())
+# Zeitachse & Assets
+dates  = panel.index.get_level_values("date").unique().sort_values()
+assets = panel.index.get_level_values("asset").unique().tolist()
 
-# Cash-Faktor stumpf aus daily_factor (keine ifs)
-rf_factor = riskfree["daily_factor_360"].reindex(dates).to_numpy()
-rf_rate = riskfree["risk_free_annual_z"].reindex(dates).to_numpy()
+# Risk-free direkt aus dem Panel
+rf_factor = panel.groupby(level="date")["rf_daily_factor_raw"].first().to_numpy()
+rf_rate   = panel.groupby(level="date")["risk_free_rate_z"].first().to_numpy()
+
 
 # --- 2) State-Spec laden & Builder „einpacken“ ---
 from src.state.state_builder import load_spec, build_state_for_date

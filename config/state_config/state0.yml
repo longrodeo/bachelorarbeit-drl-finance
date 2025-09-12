@@ -1,14 +1,14 @@
 # config/state_specs/state0.yml
 name: S0
 per_asset_features:
-  - open
-  - high
-  - low
-  - close
-  - volume
-  - daily_return_log
-  - volatility_becker_parkinson
-  - bid_ask_spread_corwin_schultz
+  - open_z
+  - high_z
+  - low_z
+  - close_z
+  - volume_z
+  - daily_return_log_z
+  - volatility_becker_parkinson_z
+  - bid_ask_spread_corwin_schultz_z
 
 add_mask_channel: true
 output_format: torch_nchw

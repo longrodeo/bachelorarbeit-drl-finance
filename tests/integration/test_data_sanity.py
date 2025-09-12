@@ -1,6 +1,6 @@
 # tests/integration/test_data_sanity.py
 import pytest
-from src.data.sanity import check_data
+from validation.sanity import check_data
 
 @pytest.mark.integration
 def test_data_sanity():

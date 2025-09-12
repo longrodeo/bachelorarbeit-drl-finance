@@ -12,7 +12,7 @@ import pandas as pd
 
 # ===== Schalter / Einstellungen ===============================================
 AUDIT_ASSET_INDEX: int = 0              # Welches Asset im t vs. t+1 Audit zeigen
-MAX_STEPS: Optional[int] = 10           # Anzahl Schritte begrenzen (None = volle Episode)
+MAX_STEPS: Optional[int] = 30           # Anzahl Schritte begrenzen (None = volle Episode)
 STRICT_ASSERTS: bool = False            # True: harte Asserts, False: nur Warnungen
 SHOW_MISSING_PRICE_ASSETS: bool = True  # Assets mit fehlenden adj_open/adj_close auflisten
 # ==============================================================================
@@ -162,11 +162,6 @@ def main(INJECT: Dict[str, Any]) -> None:
               "adj_close@t+1:", float(px_t1.get("adj_close", float("nan"))),
               "spread(cs)@t+1:", float(px_t1.get("bid_ask_spread_corwin_schultz", 0.0)))
 
-    # 4) Ein paar Schritte rollen (Cash ↔ Equal-Weight im Wechsel)
-    a_cash = np.zeros(A + 1); a_cash[-1] = 1.0
-    a_eq   = np.zeros(A + 1)
-    if A > 0:
-        a_eq[:-1] = 1.0 / A
 
     max_steps = MAX_STEPS if MAX_STEPS is not None else (env.last_step - env.start_idx + 1)
     max_steps = int(min(max_steps, (env.last_step - env.start_idx + 1)))
@@ -178,15 +173,24 @@ def main(INJECT: Dict[str, Any]) -> None:
         # WICHTIG: Trade-Datum (t+1) VOR dem step merken (vermeidet Off-by-one)
         t_before = int(env.t)
         trade_date = env.dates[env.t + 1]
-        cash_before = float(env.cash)  # Cash direkt vor Ausführung
 
-        act = a_cash if (k % 2 == 0) else a_eq
-        obs, reward, terminated, truncated, info = env.step(act)
+        # === TEST-ACTION: ab erstem handelbaren Schritt (t+1 >= 20) ===
+        A = getattr(env, "A", len(getattr(env, "assets", [])))  # Anzahl Assets
+        if env.t >= 19:
+            a = np.zeros(A + 1)  # +1 für Cash
+            a[:A] = 0.30 / A  # 30% gleichverteilt auf Assets
+            a[-1] = 1.0 - a[:A].sum()  # Rest in Cash
+        else:
+            a = np.zeros(A + 1);
+            a[:A] = 0.30 / A
+
+
+        obs, reward, terminated, truncated, info = env.step(a)
 
         # 4a) Fehlende Preise an trade_date melden (z. B. ETH vor 2015)
         if SHOW_MISSING_PRICE_ASSETS:
             px_t1 = panel_clean.xs(trade_date, level=0)
-            bad = px_t1[["adj_open", "adj_close"]].isna().any(axis=1)
+            bad = px_t1[["adj_open_raw", "adj_close_raw"]].isna().any(axis=1)
             missing = px_t1.index[bad].tolist()
             if missing:
                 print(f"[AUDIT] fehlende adj_open/adj_close @ {trade_date}: {missing}")
@@ -202,12 +206,12 @@ def main(INJECT: Dict[str, Any]) -> None:
                     print(f"[EXEC] Datum (t+1) = {trade_date}")
                     for a, row in nz.iterrows():
                         fee = fees_df.loc[a]
-                        p_ref_panel = float(panel_clean.xs(trade_date, level=0).loc[a, "adj_open"])
+                        p_ref_panel = float(panel_clean.xs(trade_date, level=0).loc[a, "adj_open_raw"])
                         _maybe_assert(abs(row["adj_open"] - p_ref_panel) < 1e-9,
                                       f"adj_open != adj_open(t+1) für {a}")
 
                         # Spread-Kontrolle: cs/2 pro Seite
-                        cs = float(panel_clean.xs(trade_date, level=0).loc[a, "bid_ask_spread_corwin_schultz"])
+                        cs = float(panel_clean.xs(trade_date, level=0).loc[a, "bid_ask_spread_corwin_schultz_raw"])
                         expected_spread = abs(row["q"]) * row["adj_open"] * (cs / 2.0)
                         _maybe_assert(abs(fee["spread_cost"] - expected_spread) < 1e-6,
                                       f"Spread-Abweichung für {a}")

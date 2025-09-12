@@ -32,26 +32,22 @@ from src.accounting.reward import RewardSpec
 # State-Building & Portfolio
 from src.state.state_builder import load_spec, build_state_for_date
 from src.portfolio.broker import PortfolioLite
-
+from src.data.load_panel_years import load_panel_years
 
 def run_env_and_record(account_dir: Path, steps: int = 10) -> None:
     """
     Lädt Panel & Riskfree, baut Env mit AccountingRecorder und
     fährt den deterministischen Smoke (Cash ↔ Equal).
     """
-    # 1) Daten laden
-    panel_clean = load_parquet(CLEAN_PANEL)
-    panel_features = load_parquet(FEATURES_NORM)
-    riskfree    = load_parquet(RISKFREE_NORM_FILE)
 
-    # Handelstage & Assets (stabile Reihenfolge aus assets.yml / SPEC)
-    dates  = panel_clean.index.get_level_values(0).unique().sort_values()
-    assets = get_assets_flat(get_asset_groups())
+    panel = load_panel_years([2015, 2016])
+    panel_clean = panel_features = panel
 
-    # Riskfree: daily factor (z. B. "daily_factor_360")
-    # → exakt wie im bestehenden Smoke-Runner genutzt
-    rf_factor = riskfree["daily_factor_360"].reindex(dates).to_numpy()
-    rf_rate = riskfree["risk_free_annual_z"].reindex(dates).to_numpy()
+    dates = panel.index.get_level_values("date").unique().sort_values()
+    assets = get_assets_flat(get_asset_groups())  # oder aus panel wie oben
+
+    rf_factor = panel.groupby(level="date")["rf_daily_factor_raw"].first().to_numpy()
+    rf_rate = panel.groupby(level="date")["risk_free_rate_norm"].first().to_numpy()
 
     # 2) State-Spec + Builder
     spec = load_spec(SPEC_S0_YAML)

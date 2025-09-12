@@ -18,6 +18,8 @@ import pandas as pd  # Datenhaltung und Transformation
 
 from src.data.trading_calendar import nyse_trading_days  # Handelskalender mit Feiertagen
 from src.data.align import align_to_trading_days  # Reindex-Helfer für Series
+from src.utils.parquet_io import save_parquet
+
 
 FRED_URL = "https://api.stlouisfed.org/fred/series/observations"  # Basis-Endpoint der API
 
@@ -38,21 +40,23 @@ def _resolve_fred_api_key(passed: Optional[str] = None) -> str:
     str
         Gefundener API-Key.
     """
-    key = "Platzhalter"  # exemplarischer Platzhalter (nicht genutzt)
+    key = "d94ae2e1f33af6364d0754e50e7cb7b7"  # exemplarischer Platzhalter (nicht genutzt)
     # key = passed or os.environ.get("FRED_API_KEY") or os.environ.get("FRED_API_TOKEN") or os.environ.get("FRED_KEY")  # schrittweise Auflösung
     if not key:  # falls kein Key ermittelt wurde
         raise ValueError("FRED API Key fehlt. Setze FRED_API_KEY (oder übergib api_key=...).")  # eindeutige Fehlermeldung
     return key  # zurückgeben des Strings
 
 
-def fetch_fred_nyse_daily(
+def load_and_process_FED_interest(
     series_id: str = "DGS3MO",
     start: str = "1990-01-01",
     end: Optional[str] = None,
     api_key: Optional[str] = None,
-    fill: str = "ffill",   # "ffill", "bfill" oder None
     tz: str = "UTC",
-) -> pd.Series:
+    basis: int = 360,
+    out_path_clean: Optional[str] = None,
+    out_path_raw: Optional[str] = None,
+):
     """Zeitreihe von FRED holen und auf NYSE-Sessions reindizieren.
 
     Parameters
@@ -91,7 +95,7 @@ def fetch_fred_nyse_daily(
     data = resp.json()  # JSON-Antwort parsen
     obs = pd.DataFrame(data.get("observations", []))  # Observations in DataFrame
     if obs.empty:  # keine Daten zurückbekommen
-        return pd.Series(name=series_id, dtype="float64")  # leere Serie
+        return print("Daten konnten nicht geladen werden.")
 
     # --- in Series (Prozent p.a.) ---
     obs["value"] = pd.to_numeric(obs["value"].replace(".", pd.NA), errors="coerce")  # Prozentwerte in float umwandeln
@@ -102,43 +106,14 @@ def fetch_fred_nyse_daily(
     cal_idx = nyse_trading_days(start=s.index.min().date().isoformat(), end=end, tz=tz)  # Handelskalender erzeugen
     df = align_to_trading_days(s.to_frame(), cal_idx)  # Reindex auf Kalender
 
-    if fill == "ffill":  # vorne auffüllen
-        df[series_id] = df[series_id].ffill()
-    elif fill == "bfill":  # hinten auffüllen
-        df[series_id] = df[series_id].bfill()
+    s_dec = (df[series_id] / 100.0)  # annual, decimal
+    df = pd.DataFrame({
+        "risk_free_rate": s_dec,  # annual, decimal
+        "rf_daily_rate": s_dec / float(basis),  # daily, decimal
+        "rf_daily_factor": 1.0 + s_dec / float(basis),  # daily factor (roh, NICHT normalisieren)
+    })
+    rf_df = save_parquet(df, out_path_clean)
+    s = save_parquet(s.to_frame(name=series_id), out_path_raw)
 
-    return df[series_id]  # Series mit Tageszinsen
+    return rf_df, s  # Datei mit Tageszinsen
 
-def annual_pct_to_daily_rate(y_annual_pct: pd.Series, basis: int = 360) -> pd.Series:
-    """Prozentangaben p.a. in tägliche einfache Rate (dezimal) umwandeln.
-
-    Parameters
-    ----------
-    y_annual_pct : pd.Series
-        Jahresrenditen in Prozent.
-    basis : int, optional
-        Zinstagebasis (360 oder 365).
-
-    Returns
-    -------
-    pd.Series
-        Tageszinssätze in Dezimalform.
-    """
-    return y_annual_pct.astype(float) / float(basis)  # Prozent → Dezimal / Basis
-
-def daily_factor(y_annual_pct: pd.Series, basis: int = 360) -> pd.Series:
-    """Multiplikativen Faktor ``1 + r_d`` aus Jahresprozenten ableiten.
-
-    Parameters
-    ----------
-    y_annual_pct : pd.Series
-        Jahresrendite in Prozent.
-    basis : int, optional
-        Zinstagebasis.
-
-    Returns
-    -------
-    pd.Series
-        ``1 + r_d`` als Faktor zur Multiplikation.
-    """
-    return 1.0 + annual_pct_to_daily_rate(y_annual_pct, basis=basis)  # Aufschlag auf 1

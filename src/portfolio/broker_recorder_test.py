@@ -10,9 +10,8 @@ from src.features.riskfree_interest import daily_factor
 # 1) Data & Setup
 ROOT = Path(__file__).resolve().parents[2]  # eine Ebene hoch von tests/
 CLEAN_PATH = ROOT / "data" / "clean" / "features_v1.parquet"
-panel = pd.read_parquet(CLEAN_PATH)  # MultiIndex (date, asset)
+panel = load_parquet(CLEAN_PATH)  # MultiIndex (date, asset)
 assets_order = panel.index.get_level_values("asset").unique().tolist()
-assets_order = [a for a in assets_order if a != "CASH"]
 
 RF_PATH = ROOT / "data" / "clean" / "riskfree.parquet"  # <- Pfad ggf. anpassen
 rf = load_parquet(RF_PATH)
@@ -44,7 +43,7 @@ def cash_factor(t):
 
 
 dates = panel.index.get_level_values("date").unique().sort_values()
-dates = dates[1:501]   # nimm die ersten 10 Handelstage
+dates = dates[0:501]   # nimm die ersten 10 Handelstage
 
 if "date" in rf.columns:
     rf = rf.set_index("date")
@@ -56,52 +55,44 @@ pf = PortfolioLite(
     col_mark="adj_close",
     col_ref="adj_open",
     col_spread="bid_ask_spread_corwin_schultz",
-    fee_kwargs={"commission_bps": 3.0, "use_vol_slippage": False},
+    fee_kwargs={"commission_bps": 25.0, "use_vol_slippage": False},
     execution_mod=execution, fees_mod=fees,
 )
 
 rec = AccountingRecorder(ROOT / "data" / "accounting_demo")
 
 # 2) Loop (5 Runden)
-for r in range(3):
+for r in range(40):
+    t1 = dates[r+1]
     t = dates[r]
-    px_t  = panel.xs(t, level="date")
-    # px_t1 = panel.xs(t1, level="date")
+    px_t1  = panel.xs(t1, level="date")
+    px_t = panel.xs(t, level="date")
 
     # Dummy-Agent: rotiert zufällig durch Assets
     w_target = pd.Series(0.0, index=assets_order)
     if r % 2 == 0:
-        w_target.iloc[2] = 0.30   # alle 2 Runden ins erste Asset
-        w_target.iloc[3] = 0.40
+        w_target.iloc[2] = 0.01   # alle 2 Runden ins erste Asset
+        w_target.iloc[3] = 0.01
+        w_target.iloc[7] = 0.01
+        w_target.iloc[5] = 0.01
     else:
-        w_target.iloc[2] = 0.10   # sonst ins zweite Asset
-        w_target.iloc[3] = 0.50
+        w_target.iloc[2] = 0.02   # sonst ins zweite Asset
+        w_target.iloc[3] = 0.02
+        w_target.iloc[7] = 0.02
+        w_target.iloc[5] = 0.02
 
-    cf = cash_factor(t)
+    cf = cash_factor(t1)
 
-    if r >= 1:
-        weights_post, info = pf.step(px_t1=px_t, w_target=w_target, cash_factor=cf)
+    if r >= 0:
+        weights_post, info = pf.step(px_t = px_t, px_t1=px_t1, w_target=w_target, cash_factor=cf)
 
     # Accounting loggen
         rec.log_round(
-            t, assets_order,
-            p1=px_t["adj_close"],
+            t1, assets_order,
+            p1=px_t1["adj_close"],
             cash=pf.cash, shares=pf.shares,
             w_post=weights_post,
             exec_df=info["trades"], fees_df=info["fees_detail"],
             round_id=r,
         )
-    if r < 1:
-        w_target = pd.Series(0.0, index=assets_order)
-        weights_post, info = pf.step(px_t1=px_t, w_target=w_target, cash_factor=cf)
-
-        rec.log_round(
-            t, assets_order,
-            p1=px_t["adj_close"],
-            cash=pf.cash, shares=pf.shares,
-            w_post=weights_post,
-            exec_df=info["trades"], fees_df=info["fees_detail"],
-            round_id=r,
-        )
-
 print("Fünf Runden fertig – schau in data/accounting_demo/")
