@@ -18,7 +18,7 @@ assets = panel.index.get_level_values("asset").unique().tolist()
 
 # Risk-free direkt aus dem Panel
 rf_factor = panel.groupby(level="date")["rf_daily_factor_raw"].first().to_numpy()
-rf_rate   = panel.groupby(level="date")["risk_free_rate_z"].first().to_numpy()
+rf_rate   = panel.groupby(level="date")["risk_free_rate_raw"].first().to_numpy()
 
 
 # --- 2) State-Spec laden & Builder „einpacken“ ---

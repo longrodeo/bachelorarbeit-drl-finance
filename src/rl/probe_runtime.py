@@ -53,8 +53,8 @@ def make_env(seed: int = 42, initial_cash: float = 1_000_000.0, train_years: int
 
     dates  = panel_clean.index.get_level_values(0).unique().sort_values()
     assets = get_assets_flat(get_asset_groups())
-    rf_factor = riskfree["daily_factor_raw"].reindex(dates).to_numpy()
-    rf_rate   = riskfree["risk_free_rate_z"].reindex(dates).to_numpy()
+    rf_factor = riskfree["rf_daily_factor_raw"].reindex(dates).to_numpy()
+    rf_rate   = riskfree["risk_free_rate_raw"].reindex(dates).to_numpy()
 
     spec = load_spec(spec_features)
 

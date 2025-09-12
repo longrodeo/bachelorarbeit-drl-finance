@@ -10,7 +10,7 @@ CPCV = ROOT / "data/clean/cpcv/years"  # hier liegen die year=YYYY.parquet
 def load_panel_years(years: list[int]) -> pd.DataFrame:
     dfs = []
     for y in years:
-        p = GOLD / f"{y}_features.parquet"
+        p = CPCV / f"{y}_features.parquet"
         if not p.exists():
             raise FileNotFoundError(f"Fehlt: {p} (cwd={Path.cwd()})")
         dfs.append(load_parquet(p))
