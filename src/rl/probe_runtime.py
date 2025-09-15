@@ -81,6 +81,7 @@ def make_env(seed: int = 42, initial_cash: float = 1_000_000.0, train_years: int
         end_idx_exclusive=end_idx_exclusive,
         validate_actions=True,
     )
+    print(f"WINDOW {start_idx} to {end_idx_exclusive}")
     env = ActionMappingWrapper(env)
     env = Monitor(env)
     env.reset(seed=seed)
@@ -168,6 +169,16 @@ def main(
 
     # TEST (deterministische Inferenz; Zeit messen)
     test_env = make_env(seed=seed+123, train_years=train_years)  # einzelne Env ohne Vec
+    base = test_env.unwrapped
+
+    def _steps_avail(b):
+        return b.end_idx_exclusive - b.start_idx - 1
+
+    if _steps_avail(base) <= test_steps:
+        # von vorne testen – oder alternativ ans Fenster-Anfang/-Mitte springen
+        base.start_idx = 0
+        test_env.reset()
+
     obs, _ = test_env.reset(seed=seed+123)
     steps = 0
     t2 = time.perf_counter()
@@ -187,7 +198,7 @@ if __name__ == "__main__":
     ap.add_argument("--algo", type=str, default="ppo", choices=["ppo", "sac"])
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--train_steps", type=int, default=200_000)
-    ap.add_argument("--stop_after", type=int, default=2_000, help="Früher Abbruch fürs Timing (Steps).")
+    ap.add_argument("--stop_after", type=int, default=20_000, help="Früher Abbruch fürs Timing (Steps).")
     ap.add_argument("--test_steps", type=int, default=5_000)
     ap.add_argument("--train_years", type=int, default=4)
     args = ap.parse_args()
