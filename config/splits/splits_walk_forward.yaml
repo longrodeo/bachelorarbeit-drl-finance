@@ -1,6 +1,10 @@
-# config/splits_wf_2021_2024.yaml
-start: 2021-01-01
-end:   2024-12-31
-train_years: 4   # üblich: 4 Jahre
-test_years:  1   # 1 Jahr OOS
-step_years:  1   # jährlich vorrollen
+strategy:
+  kind: walkforward
+  splits: config/splits_wf_2021_2024.yaml
+  wf:
+    start: 2015-01-01   # damit erstes Testjahr 2021 möglich ist (4y Train)
+    end:   2024-12-31
+    first_train_years: 6
+    test_years: 1
+    step_years: 1
+    expanding: true     # <<< neu

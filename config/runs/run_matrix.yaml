@@ -82,6 +82,7 @@ matrix:
       reward:   {kind: log}
       algo:     {name: ppo}
       state_spec: config/state_config/state0.yml
+      features_source: features_v1_raw_z
       seed: 7
       overrides:
         run: {total_timesteps: 300000}   # per-Run Override möglich

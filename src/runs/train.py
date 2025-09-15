@@ -9,6 +9,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from src.env.data_builder import load_data_for_windows, build_env_segment
 from src.rl.agent_policy import make_agent
 from src.accounting.evaluator import compute_rewards_from_snapshots, RewardSpec, OnlineEvaluator
+from src.data.load_panel_years import load_panel_years, load_panel_wf
 
 def _read_windows(strategy: str, path: str):
     if strategy == "cpcv":
@@ -30,10 +31,11 @@ def main():
     p.add_argument("--total_timesteps", type=int, default=200_000)
     p.add_argument("--run_root", default="data/accounting/runs")
     p.add_argument("--eval_mode", choices=["from_snapshots", "online"], default="from_snapshots")
+    p.add_argument("--features_source", default="features_v1_raw_z")
     args = p.parse_args()
 
     windows = _read_windows(args.strategy, args.splits)
-    panel = load_data_for_windows(windows)
+    panel = load_data_for_windows(windows, strategy=args.strategy, features_source=args.features_source)
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = Path(args.run_root) / f"{args.algo}_{args.reward}_{Path(args.state_spec).stem}_{args.strategy}_{ts}"

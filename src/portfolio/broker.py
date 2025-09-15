@@ -115,7 +115,7 @@ class PortfolioLite:
         w = pd.Series(w_exec, index=self.assets)
 
         #----------Debug Prints------
-        # print(F"w_prev {w_prev}")
+        #print(F"w_prev {w_prev}")
         #print(f"Target_after_control {w}")
         #print(f"adj_close_t_plus_1 {adj_close_t_plus_1}")
         #print(f"adj_close_t {adj_close_t}")

@@ -57,7 +57,7 @@ class TradingEnv(gym.Env):
 
         # --- Episodenfenster ---
         start_idx: int = 0,
-        end_idx_exclusive: Optional[int] = None,  # EXKLUSIV! step(t) braucht t+1 < end_idx_exclusive
+        end_idx_exclusive: int,  # EXKLUSIV! step(t) braucht t+1 < end_idx_exclusive
 
         # --- Sonstiges ---
         validate_actions: bool = False,  # Notfall-Schutz (Policy hat Softmax → meist False)
@@ -115,12 +115,24 @@ class TradingEnv(gym.Env):
         if self.RF_RATE.shape[0] != self.T:
             raise ValueError("rf_rate/rf_factor-Längen passen nicht zu 'dates'.")
 
-        # Episoden-Grenzen (t+1 muss existieren => letzter gültiger t = end_excl - 2)
-        end_excl = self.T if end_idx_exclusive is None else min(int(end_idx_exclusive), self.T)
-        self.last_step = end_excl - 2
-        assert self.last_step >= 0, "Zeitfenster zu klein: mindestens 2 Zeitpunkte notwendig."
-        self.start_idx = int(start_idx)
-        assert 0 <= self.start_idx <= self.last_step, "start_idx außerhalb gültigen Bereichs."
+        # Fenster-Parameter persistent speichern (exklusives Ende)
+        n = len(self.dates)
+
+        start_idx = max(0, min(start_idx, n - 1))
+        end_idx_exclusive = max(start_idx + 1, min(end_idx_exclusive, n))
+
+        self.start_idx = start_idx
+        self.end_idx_exclusive = end_idx_exclusive
+
+        # davon abgeleitete Größen:
+        self.last_step = self.end_idx_exclusive - 2  # letzter t mit gültigem t+1
+        steps_avail = self.end_idx_exclusive - self.start_idx - 1  # Anzahl Schritte t→t+1
+
+        # Guards
+        assert 0 <= self.start_idx < self.end_idx_exclusive <= len(self.dates), \
+            f"Fenster ungültig: start_idx={self.start_idx} end_idx_exclusive={self.end_idx_exclusive} len={len(self.dates)}"
+        assert steps_avail > 0, \
+            f"Zu kleines Fenster: steps_avail={steps_avail} (braucht ≥1 Schritt t→t+1)"
 
         # ---------- Probe-State → Observation-Space ----------
         # Start-Portfolio: 100% Cash (Assets=0)

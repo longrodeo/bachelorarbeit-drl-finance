@@ -3,11 +3,11 @@
 # Misst (1) Trainingsdauer bis StopAfterNSteps und (2) Testdauer für N Steps/Episode.
 from __future__ import annotations
 import time
-from pathlib import Path
+from datetime import datetime
 
 import gymnasium as gym
-import numpy as np
 import pandas as pd
+import numpy as np
 import torch
 from stable_baselines3 import PPO, SAC
 from stable_baselines3.common.monitor import Monitor
@@ -16,9 +16,9 @@ from stable_baselines3.common.callbacks import BaseCallback, CallbackList
 
 # Projekt-Imports (unverändert aus deinem Code-Basisstand)
 from src.rl.cnn_extractor import CNN1DExtractor
-from src.utils.paths import CLEAN_PANEL, FEATURES_NORM, get_asset_groups, get_assets_flat
+from src.utils.paths import FEATURES_NORM, get_asset_groups, get_assets_flat
 from src.utils.parquet_io import load_parquet
-from src.state.state_builder import load_spec, build_state_for_date
+import src.state.state_builder as sb
 from src.env.trading_env import TradingEnv
 from src.portfolio.broker import PortfolioLite
 from src.rl.wrapper import ActionMappingWrapper
@@ -47,16 +47,14 @@ if torch.cuda.is_available():
 
 # --- Env-Factory (ohne Accounting) -------------------------------------------
 def make_env(seed: int = 42, initial_cash: float = 1_000_000.0, train_years: int | None = 4) -> gym.Env:
-    panel_clean    = load_parquet(CLEAN_PANEL)
     panel_features = load_parquet(FEATURES_NORM)
-    riskfree       = load_parquet(FEATURES_NORM)
 
-    dates  = panel_clean.index.get_level_values(0).unique().sort_values()
+    dates  = panel_features.index.get_level_values(0).unique().sort_values()
     assets = get_assets_flat(get_asset_groups())
-    rf_factor = riskfree["rf_daily_factor_raw"].reindex(dates).to_numpy()
-    rf_rate   = riskfree["risk_free_rate_raw"].reindex(dates).to_numpy()
+    rf_factor = panel_features["rf_daily_factor_raw"].reindex(dates).to_numpy()
+    rf_rate   = panel_features["risk_free_rate_raw"].reindex(dates).to_numpy()
 
-    spec = load_spec(spec_features)
+    spec = sb.load_spec(spec_features)
 
     # Fenster: letzte N Jahre
     start_idx = 0
@@ -67,12 +65,12 @@ def make_env(seed: int = 42, initial_cash: float = 1_000_000.0, train_years: int
         start_idx = int(dates.searchsorted(start_date, side="left"))
 
     env = TradingEnv(
-        panel_clean=panel_clean,
+        panel_clean=panel_features,
         panel_features=panel_features,
         dates=dates,
         assets=assets,
         spec=spec,
-        state_builder=dict(build_state_for_date=build_state_for_date),
+        state_builder=sb,
         portfolio=PortfolioLite(assets=assets, initial_cash=initial_cash),
         initial_cash=initial_cash,
         rf_factor=rf_factor,
@@ -134,10 +132,39 @@ def main(
         cb_list.append(StopAfterNSteps(max_timesteps=stop_after, verbose=1))
     callback = CallbackList(cb_list) if cb_list else None
 
+    #-----------Startausgabe--------------
+    base = env.envs[0].unwrapped if hasattr(env, "envs") else env.unwrapped
+    obs = env.reset()
+    shapes = {k: tuple(np.array(v).shape) for k, v in obs.items()}
+    d0 = pd.Timestamp(base.dates[base.start_idx]).date()
+    d1 = pd.Timestamp(base.dates[base.end_idx_exclusive - 1]).date()
+    steps_avail = int(base.end_idx_exclusive - base.start_idx)
+    cuda_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"
+
+    print(f"[START] {datetime.now():%Y-%m-%d %H:%M:%S} | algo={algo.upper()} seed={seed}")
+    print(f"[DATA]  {d0} → {d1} | steps_avail={steps_avail:,} | assets={len(base.assets)}")
+    print(f"[OBS]   keys={list(shapes.keys())} | shapes={shapes}")
+    print(f"[HW]    device={model.device} | cuda={'yes' if torch.cuda.is_available() else 'no'} ({cuda_name})")
+    print(f"[CFG]   train_steps={train_steps:,} | stop_after={stop_after:,} | test_steps={test_steps:,} | train_years={train_years}")
+    # -----------------------------------------------------------------------
+
     t0 = time.perf_counter()
     model.learn(total_timesteps=int(train_steps), callback=callback)
     t1 = time.perf_counter()
     print(f"[TIME] Training: {t1 - t0:.2f} s (requested={train_steps:,} steps, stop_after={stop_after:,})")
+
+    #---------------------------------------------------
+    # Training mit Steps/s
+    t0_steps = int(model.num_timesteps)
+    t0 = time.perf_counter()
+    model.learn(total_timesteps=int(train_steps), callback=callback)
+    t1 = time.perf_counter()
+
+    train_exec = int(model.num_timesteps - t0_steps)
+    train_sps = train_exec / max(t1 - t0, 1e-9)
+    print(f"[TIME] Training: {t1 - t0:.2f} s | steps={train_exec:,} | {train_sps:.1f} steps/s "
+          f"(requested={train_steps:,}, stop_after={stop_after:,})")
+    # ---------------------------------------------------
 
     # TEST (deterministische Inferenz; Zeit messen)
     test_env = make_env(seed=seed+123, train_years=train_years)  # einzelne Env ohne Vec
@@ -151,7 +178,8 @@ def main(
         done = bool(terminated or truncated)
         steps += 1
     t3 = time.perf_counter()
-    print(f"[TIME] Test:     {t3 - t2:.2f} s (executed={steps:,} steps, done={done})")
+    test_sps = steps / max(t3 - t2, 1e-9)
+    print(f"[TIME] Test:     {t3 - t2:.2f} s | steps={steps:,} | {test_sps:.1f} steps/s | done={done}")
 
 if __name__ == "__main__":
     import argparse
@@ -159,7 +187,7 @@ if __name__ == "__main__":
     ap.add_argument("--algo", type=str, default="ppo", choices=["ppo", "sac"])
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--train_steps", type=int, default=200_000)
-    ap.add_argument("--stop_after", type=int, default=10_000, help="Früher Abbruch fürs Timing (Steps).")
+    ap.add_argument("--stop_after", type=int, default=2_000, help="Früher Abbruch fürs Timing (Steps).")
     ap.add_argument("--test_steps", type=int, default=5_000)
     ap.add_argument("--train_years", type=int, default=4)
     args = ap.parse_args()

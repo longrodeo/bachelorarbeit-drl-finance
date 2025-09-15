@@ -9,6 +9,13 @@ import pandas as pd
 # Spec (raster-only, 2-Branch-Design: CNN-Raster + Vektor-Branch)
 # ------------------------------------------------------------
 
+def finite_scalar(x, default=0.0):
+    try:
+        val = float(x)
+    except Exception:
+        return float(default)
+    return float(val) if np.isfinite(val) else float(default)
+
 @dataclass(frozen=True)
 class StateSpec:
     """
@@ -121,8 +128,10 @@ def build_state_for_date(
 
     # letzte Portfolio-Return-Info (Key tolerant)
     # last_ret = portfolio_snapshot.get("portfolio_return_prev", portfolio_snapshot.get("r_past"))
-    cash_val = portfolio_snapshot.get("cash")
+    cash_val = finite_scalar(portfolio_snapshot.get("cash"),0.0)
+    riskfree = finite_scalar(riskfree,0.0)
     # nav_val  = portfolio_snapshot.get("nav")
+
 
 
     g_scalars_list: List[float] = []
@@ -140,6 +149,10 @@ def build_state_for_date(
     _push(riskfree, "riskfree_rate")
 
     g_scalars = np.asarray(g_scalars_list, dtype=float)  # [G]
+
+    assert np.isfinite(X).all(), "NaN/Inf in CNN-Raster"
+    assert np.isfinite(g_scalars).all(), "NaN/Inf in g_scalars"
+    assert np.isfinite(g_weights).all(), "NaN/Inf in g_weights"
 
     return {
         "X": X,
