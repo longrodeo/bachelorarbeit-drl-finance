@@ -40,6 +40,18 @@ def iter_windows_from_yaml(path: str | Path) -> List[Fold]:
 
     return folds
 
-def _to_date(s: str) -> date:
+from datetime import date, datetime
+
+def _to_date(x) -> date:
+    """Robuste Normalisierung: akzeptiert str, datetime, date, pandas/NumPy-ähnliche Typen."""
+    if isinstance(x, datetime):
+        return x.date()
+    if isinstance(x, date):
+        return x
+    # z.B. pandas.Timestamp / numpy.datetime64:
+    if hasattr(x, "to_pydatetime"):
+        return x.to_pydatetime().date()
+    s = str(x)
     y, m, d = map(int, s.split("-"))
     return date(y, m, d)
+

@@ -3,9 +3,13 @@ import pandas as pd
 from src.utils.parquet_io import load_parquet, save_parquet
 
 class AccountingRecorder:
-    def __init__(self, out_dir: Path):
+    def __init__(self, out_dir: Path, meta: dict | None = None):
         self.out_dir = Path(out_dir)
         self.out_dir.mkdir(parents=True, exist_ok=True)
+        self.meta = meta or {}
+        # optional: direkt persistieren
+        from src.utils.manifest import write_manifest
+        write_manifest(self.meta, str(self.out_dir / "meta.json"))
         self.snap_path = self.out_dir / "portfolio_snapshots.parquet"
         self.evt_path  = self.out_dir / "trade_events.parquet"
 

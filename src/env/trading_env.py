@@ -69,7 +69,6 @@ class TradingEnv(gym.Env):
         # ---------- Daten & Handles ----------
         self.panel = panel_clean
         self.panel_features_norm = panel_clean if panel_features is None else panel_features  # fallback
-        self.dates = pd.DatetimeIndex(dates)
         self.assets = list(assets)
         self.spec = spec
         self.SB = state_builder          # hat build_state_for_date(...)
@@ -101,6 +100,17 @@ class TradingEnv(gym.Env):
             if not self.panel_features_norm.index.equals(self.panel.index):
                 raise ValueError("panel_features und panel_clean müssen denselben MultiIndex (date, asset) haben.")
 
+        lvl0 = self.panel.index.get_level_values(0)
+        tz_target = getattr(lvl0, "tz", None)
+
+        self.dates = pd.DatetimeIndex(dates)
+        if tz_target is not None:
+            # Wenn dates tz-naiv → lokalisiere; sonst konvertiere
+            self.dates = (
+                self.dates.tz_localize(tz_target)
+                if self.dates.tz is None
+                else self.dates.tz_convert(tz_target)
+            )
         # ---------- Dimensionen ----------
         self.T = len(self.dates)      # #Zeitschritte
         self.A = len(self.assets)     # #Assets

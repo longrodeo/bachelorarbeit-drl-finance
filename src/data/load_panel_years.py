@@ -10,7 +10,7 @@ CLEAN_ROOT = ROOT / "data" / "clean"
 def load_panel_years(years: list[int]) -> pd.DataFrame:
     dfs = []
     for y in years:
-        p = CLEAN_ROOT / "cpcv" / f"{y}" /f"{y}_features.parquet"
+        p = CLEAN_ROOT / "cpcv" / "years" / f"{y}" /f"{y}_features.parquet"
         if not p.exists():
             raise FileNotFoundError(f"Fehlt: {p} (cwd={Path.cwd()})")
         dfs.append(load_parquet(p))
