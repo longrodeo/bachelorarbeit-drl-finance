@@ -3,13 +3,15 @@ from __future__ import annotations
 import argparse, json
 from pathlib import Path
 from datetime import datetime
-
+import shutil, json
 from functools import partial
 from stable_baselines3.common.vec_env import DummyVecEnv
+
 import src.state.state_builder as sb
 from src.env.data_builder import load_data_for_windows, build_env_segment
 from src.rl.agent_policy import make_agent
 from src.accounting.evaluator import compute_rewards_from_snapshots, RewardSpec, OnlineEvaluator
+from src.utils import paths
 
 # helper: robustes Reset/Step-Handling für eval
 def _unpack_reset(env):
@@ -48,14 +50,28 @@ def main():
     p.add_argument("--algo", choices=["ppo", "sac"], default="ppo")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--total_timesteps", type=int, default=5_000)
-    p.add_argument("--run_root", default="data/accounting/runs")
+    p.add_argument("--run_root", default="accounting/runs")
     p.add_argument("--eval_mode", choices=["from_snapshots", "online"], default="from_snapshots")
     p.add_argument("--features_source", default="features_v1_raw_z")
     args = p.parse_args()
 
-    windows = _read_windows(args.strategy, args.splits)
+    windows = list(_read_windows(args.strategy, args.splits))
+    print("[DEBUG] _read_windows returned:", type(windows))
+    try:
+        print("[DEBUG] number of windows (len):", len(windows))
+    except TypeError:
+        print("[DEBUG] windows is not sized (generator). Convert to list to iterate safely.")
+    print(f"[RUN] {len(windows)} splits loaded from {args.splits}")
     panel = load_data_for_windows(windows, strategy=args.strategy, features_source=args.features_source)
     spec = sb.load_spec(str(args.state_spec))
+
+    if args.strategy.lower() == "walkforward":
+        print(f"[DATA] walk-forward -> using features_source={args.features_source}")
+    else:
+        # best effort: extract years (same logic as in data_builder)
+        years = sorted({int(s[0][:4]) for w in windows for part in ("train", "test") for s in w.get(part, [])} |
+                       {int(s[1][:4]) for w in windows for part in ("train", "test") for s in w.get(part, [])})
+        print(f"[DATA] cpcv -> loading per-year parquet for years={years}")
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = Path(args.run_root) / f"{args.algo}_{args.reward}_{Path(args.state_spec).stem}_{args.strategy}_{ts}"
@@ -66,6 +82,21 @@ def main():
         "timesteps": args.total_timesteps, "timestamp": ts
     }
     (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    meta = {
+        "cmdline_args": vars(args),  # Python argparse -> dict
+        "splits_file": str(args.splits),
+        "state_spec": str(args.state_spec),
+        "algo": args.algo,
+        "reward": args.reward,
+    }
+    # write JSON
+    (run_dir / "run_meta.json").write_text(json.dumps(meta, indent=2))
+    # copy used splits yaml for audit
+    try:
+        shutil.copyfile(args.splits, run_dir / Path(args.splits).name)
+    except Exception:
+        pass
 
     # ---------- WF: Modell einmal vor der Schleife bauen ----------
     model = None
@@ -81,6 +112,7 @@ def main():
         fold_dir = run_dir / f"fold_{k:02d}"
         (fold_dir / "train").mkdir(parents=True, exist_ok=True)
         (fold_dir / "test").mkdir(parents=True, exist_ok=True)
+        (fold_dir / "fold_meta.json").write_text(json.dumps(fold, indent=2))
 
         # === TRAIN: mehrere Episoden ohne Recorder ===
         def _make(seg):
@@ -115,11 +147,28 @@ def main():
                 # close afterwards
                 env.close()
 
-            compute_rewards_from_snapshots(
-                accounting_dir=(fold_dir / "test"),
-                spec=RewardSpec(kind=args.reward),
-                out_name="rewards.parquet"
-            )
+                #Make path relative to project/data (compute_rewards expects DATA_DIR / accounting_dir)
+                try:
+                    acc_dir_rel = seg_dir.relative_to(paths.DATA_DIR)
+                    print(f"First {acc_dir_rel}")
+                except Exception:
+                    parts = seg_dir.parts
+                    if parts and parts[0].lower() == "data":
+                        acc_dir_rel = Path(*parts[1:])
+                        print(f"Second {acc_dir_rel}")
+                    else:
+                        try:
+                            acc_dir_rel = seg_dir.relative_to(Path.cwd() / "data")
+                            print(f"Thrid {acc_dir_rel}")
+                        except Exception:
+                            raise RuntimeError(
+                                f"Kann {seg_dir} nicht in einen Pfad relativ zu project/data umwandeln; prüfe run_root.")
+
+                compute_rewards_from_snapshots(
+                    accounting_dir=acc_dir_rel,
+                    spec=RewardSpec(kind=args.reward),
+                    out_name="rewards.parquet"
+                )
 
         # ===== TEST: online =====
         else:  # online

@@ -20,12 +20,12 @@ grid:
     - kind: icvar
       icvar:
         alpha: 0.05
-        min_period: 60
+        min_period: 40
         lambda: 1.0
     - kind: icvar_dd
       icvar:
         alpha: 0.05
-        min_period: 60
+        min_period: 40
         lambda: 1.0
       dd:
         gamma: 0.0
@@ -71,7 +71,7 @@ grid:
   state_spec:
     - config/state_config/state0.yml
     - config/state_config/state1.yml
-  seed: [7]               # hier kannst du später mehrere Seeds eintragen
+  seed: [42]               # hier kannst du später mehrere Seeds eintragen
 
 # Optional: gezielte Kombinationen (statt vollem Kartesischen Produkt)
 # Wenn vorhanden, ignoriert der Runner "grid" und nutzt nur diese Liste.
