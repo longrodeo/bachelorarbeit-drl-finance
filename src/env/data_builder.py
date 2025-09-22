@@ -15,7 +15,7 @@ from src.env.trading_env import TradingEnv
 from src.accounting.recorder import AccountingRecorder
 from src.utils.paths import get_assets_flat, get_asset_groups
 from src.portfolio.broker import PortfolioLite
-from src.accounting.evaluator import OnlineEvaluator
+import src.accounting.evaluator as evalmod
 
 
 Segment = Tuple[str, str]
@@ -85,11 +85,7 @@ def build_env_segment(panel, seg, state_spec, reward_kind, with_recorder, out_di
     rf_factor = rf_factor.reindex(dates).to_numpy()
     rf_rate   = rf_rate  .reindex(dates).to_numpy()
 
-    evaluator = None
-    if reward_kind in ("icvar", "icvar_dd"):
-        # OnlineEvaluator ist minimal und passt als default-implementation
-        # (sofern sie die benötigten Methoden bereitstellt).
-        evaluator = OnlineEvaluator(kind=reward_kind)
+    evaluator = evalmod if reward_kind in ("icvar", "icvar_dd") else None
 
     recorder = None
     if with_recorder:
