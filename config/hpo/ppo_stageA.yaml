@@ -1,0 +1,31 @@
+- _name: T1_policy_push
+  n_epochs: 12
+  gae_lambda: 0.90
+  vf_coef: 0.70
+  learning_rate: 0.00030
+  clip_range: 0.20
+  target_kl: 0.012
+
+- _name: T2_policy_push_lr_up
+  n_epochs: 12
+  gae_lambda: 0.90
+  vf_coef: 0.70
+  learning_rate: 0.00036   # +20%
+  clip_range: 0.20
+  target_kl: 0.012
+
+- _name: T3_critic_stronger
+  n_epochs: 12
+  gae_lambda: 0.90
+  vf_coef: 0.80            # Critic stärker
+  learning_rate: 0.00030
+  clip_range: 0.20
+  target_kl: 0.012
+
+- _name: T4_adv_less_variance
+  n_epochs: 12
+  gae_lambda: 0.85         # Advantage entrauschen
+  vf_coef: 0.70
+  learning_rate: 0.00030
+  clip_range: 0.20
+  target_kl: 0.012

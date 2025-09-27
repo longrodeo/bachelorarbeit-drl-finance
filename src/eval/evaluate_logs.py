@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import pandas as pd
 from typing import Optional, Dict, Any
-from src.eval.kpis import scorecard_train, scorecard_baseline  # aus deinem kpis.py
+from src.eval.metrics import scorecard_train, scorecard_baseline  # aus deinem kpis.py
 
 def evaluate_run(
     out_dir: Path | str,

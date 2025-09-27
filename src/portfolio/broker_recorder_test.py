@@ -5,11 +5,10 @@ from portfolio.broker import PortfolioLite
 import execution, fees
 from accounting.recorder import AccountingRecorder
 from utils.parquet_io import load_parquet
-from src.features.riskfree_interest import daily_factor
 
 # 1) Data & Setup
 ROOT = Path(__file__).resolve().parents[2]  # eine Ebene hoch von tests/
-CLEAN_PATH = ROOT / "data" / "clean" / "features_v1.parquet"
+CLEAN_PATH = ROOT / "data" / "clean" / "benchmark.parquet"
 panel = load_parquet(CLEAN_PATH)  # MultiIndex (date, asset)
 assets_order = panel.index.get_level_values("asset").unique().tolist()
 
@@ -24,26 +23,17 @@ rf.index = pd.to_datetime(rf.index).normalize()
 rf = rf.sort_index()
 
 
-rf_ann_pct = rf["risk_free_annual"]
-
-rf_ann_pct = rf_ann_pct.astype(float).ffill()
-
-# 2) Tagesfaktoren aus Jahreszins (Basis 360), dann auf Kalendertage auffüllen
-f_daily = daily_factor(rf_ann_pct, basis=360)   # -> 1 + r_daily
-f_daily = f_daily.asfreq("D", method="ffill")
-
-# 3) Faktor für Intervall [t, t1): Produkt der Tagesfaktoren
-from datetime import timedelta
-def cash_factor(t):
-    t = pd.Timestamp(t).normalize()
-    return f_daily[t]
+rf_daily = rf["rf_daily_factor"]
+rf_daily = rf_daily.ffill().bfill()
 
 # (Optional) Sanity-Check: alle Handelstage im f_daily-Index
 # assert pd.to_datetime(dates).normalize().isin(f_daily.index).all()
 
 
 dates = panel.index.get_level_values("date").unique().sort_values()
-dates = dates[0:501]   # nimm die ersten 10 Handelstage
+print(len(dates))
+dates = dates[0:2515]   # nimm die ersten 10 Handelstage
+
 
 if "date" in rf.columns:
     rf = rf.set_index("date")
@@ -62,7 +52,7 @@ pf = PortfolioLite(
 rec = AccountingRecorder(ROOT / "data" / "accounting_demo")
 
 # 2) Loop (5 Runden)
-for r in range(40):
+for r in range(2515):
     t1 = dates[r+1]
     t = dates[r]
     px_t1  = panel.xs(t1, level="date")
@@ -71,20 +61,23 @@ for r in range(40):
     # Dummy-Agent: rotiert zufällig durch Assets
     w_target = pd.Series(0.0, index=assets_order)
     if r % 2 == 0:
-        w_target.iloc[2] = 0.01   # alle 2 Runden ins erste Asset
-        w_target.iloc[3] = 0.01
-        w_target.iloc[7] = 0.01
-        w_target.iloc[5] = 0.01
-    else:
-        w_target.iloc[2] = 0.02   # sonst ins zweite Asset
-        w_target.iloc[3] = 0.02
-        w_target.iloc[7] = 0.02
-        w_target.iloc[5] = 0.02
+        w_target.iloc[0] = 0.85   # alle 2 Runden ins erste Asset
+        w_target.iloc[1] = 0.05
+        w_target.iloc[2] = 0.10
 
-    cf = cash_factor(t1)
+    else:
+        w_target.iloc[0] = 0.85
+        w_target.iloc[1] = 0.05
+        w_target.iloc[2] = 0.10
+
+    cf = rf_daily.reindex([t]).ffill().bfill().iloc[0]
+    cf = float(cf)
 
     if r >= 0:
         weights_post, info = pf.step(px_t = px_t, px_t1=px_t1, w_target=w_target, cash_factor=cf)
+        #print(px_t)
+        # assert not px_t.isna().any().any(), f"NaN im Preis bei {t}"
+        assert not pd.isna(cf), f"NaN im riskfree bei {t}"
 
     # Accounting loggen
         rec.log_round(

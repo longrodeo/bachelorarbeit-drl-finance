@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 
+from portfolio.execution import round_shares
 from src.portfolio import execution as _execution
 from src.portfolio import fees as _fees
 from src.portfolio.execution_controls import apply_execution_controls
@@ -138,7 +139,23 @@ class PortfolioLite:
 
         # 3b) Delta-Stücke & Lot-Rundung
         q = target_shares - self.shares
-        q = self.exec.round_shares(q, lot=self.lot_size)  # Series -> Series
+
+        # q ist eine Series: Index = Assets
+        mask_crypto = q.index.isin(["BTC-USD", "ETH-USD"])
+
+        # Standard: runde auf ganze Stücke
+        q_rounded = q.copy()
+        q_rounded[~mask_crypto] = round_shares(q.loc[~mask_crypto])
+
+        # Für BTC/ETH bleibt der ursprüngliche Wert erhalten
+        q = q_rounded
+
+
+        eps_shares = 1e-8  # Stückzahl-Toleranz (für BTC/ETH sinnvoll)
+        min_notional = 1.0  # keine Orders unter 1 USD Gegenwert
+        px = px_t[self.col_mark]
+        q.loc[q.abs() < eps_shares] = 0.0
+        q.loc[(q.abs() * px).abs() < min_notional] = 0.0
 
         # 4) Execution (eine Wahrheit: plan_execution_series)
         spread = px_t1.get(self.col_spread, pd.Series(0.0, index=adj_open_t_plus_1.index)).astype(float)

@@ -6,6 +6,7 @@ from datetime import datetime
 import shutil, json
 from functools import partial
 from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.vec_env import SubprocVecEnv
 
 import src.state.state_builder as sb
 from src.env.data_builder import load_data_for_windows, build_env_segment
@@ -41,6 +42,42 @@ def _read_windows(strategy: str, path: str):
         raise ValueError(f"strategy not supported: {strategy}")
     return iter_windows_from_yaml(path)
 
+# Helper für verschiedene Envs für HP Optimierung
+def _make_seeded_env(panel, seg, spec, reward, seed_i):
+    env = build_env_segment(panel, seg, state_spec=spec, reward_kind=reward,
+                            with_recorder=False, out_dir=None)
+    # Gymnasium: Reset mit Seed; Fallback auf .seed()
+    try:
+        env.reset(seed=seed_i)
+    except TypeError:
+        env.seed(seed_i)
+    return env
+
+def _vec_for_fold(fold, panel, spec, reward, n_envs, mode, seed_base):
+    train_segs = list(fold["train"])
+    if mode == "seeds":
+        base_seg = train_segs[0]
+        fns = [lambda s=seed_base+i: _make_seeded_env(panel, base_seg, spec, reward, s)
+               for i in range(n_envs)]
+    else:  # "segments": Segmente ggf. zyklisch auffüllen bis n_envs erreicht
+        if n_envs <= len(train_segs):
+            use_segs = train_segs[:n_envs]
+        else:
+            reps = (n_envs + len(train_segs) - 1) // len(train_segs)
+            use_segs = (train_segs * reps)[:n_envs]
+        fns = [lambda seg=use_segs[i], s=seed_base+i:
+               _make_seeded_env(panel, seg, spec, reward, s) for i in range(n_envs)]
+    Vec = SubprocVecEnv if n_envs > 1 else DummyVecEnv
+    return Vec(fns)
+
+def _load_trials(path):
+    import yaml, json
+    with open(path, "r", encoding="utf-8") as f:
+        if path.endswith(".json"):
+            return json.load(f)
+        return yaml.safe_load(f)
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--strategy", choices=["cpcv", "walkforward"], required=True)
@@ -50,9 +87,15 @@ def main():
     p.add_argument("--algo", choices=["ppo", "sac"], default="ppo")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--total_timesteps", type=int, default=5_000)
-    p.add_argument("--run_root", default="accounting/runs")
+    p.add_argument("--run_root", default="data/accounting/runs")
     p.add_argument("--eval_mode", choices=["from_snapshots", "online"], default="from_snapshots")
     p.add_argument("--features_source", default="features_v1_raw_z")
+    p.add_argument("--n_envs", type=int, default=1)
+    p.add_argument("--env_mode", choices=["segments", "seeds"], default="segments")
+    p.add_argument("--hpo_mode", choices=["none", "grid"], default="none")
+    p.add_argument("--hpo_param_file", type=str, default=None)  # YAML/JSON: Liste von Trials
+    p.add_argument("--hpo_splits", type=str, default=None)  # z.B. "0,5,9" (nur diese 3 Folds)
+
     args = p.parse_args()
 
     windows = list(_read_windows(args.strategy, args.splits))
@@ -64,6 +107,11 @@ def main():
     print(f"[RUN] {len(windows)} splits loaded from {args.splits}")
     panel = load_data_for_windows(windows, strategy=args.strategy, features_source=args.features_source)
     spec = sb.load_spec(str(args.state_spec))
+
+    # Beispiel: nur diese Folds in Stage A verwenden
+    if args.hpo_splits:
+        keep = [int(x) for x in args.hpo_splits.split(",")]
+        windows = [windows[i] for i in keep]
 
     if args.strategy.lower() == "walkforward":
         print(f"[DATA] walk-forward -> using features_source={args.features_source}")
@@ -98,6 +146,13 @@ def main():
     except Exception:
         pass
 
+    # ---- HPO: Trials bestimmen ----
+    trials = [{"_name": "single"}]  # Default: normaler Run ohne HPO
+    if args.hpo_mode == "grid":
+        assert args.hpo_param_file, "--hpo_param_file ist nötig bei hpo_mode=grid"
+        trials = _load_trials(args.hpo_param_file)  # Liste von Dicts
+
+
     # ---------- WF: Modell einmal vor der Schleife bauen ----------
     model = None
     if args.strategy == "walkforward":
@@ -108,90 +163,108 @@ def main():
         model = make_agent(args.algo, init_env, tensorboard_log=str(run_dir / "tb"), seed=args.seed)
 
     # TRAIN/TEST pro Fold
-    for k, fold in enumerate(windows, 1):
-        fold_dir = run_dir / f"fold_{k:02d}"
-        (fold_dir / "train").mkdir(parents=True, exist_ok=True)
-        (fold_dir / "test").mkdir(parents=True, exist_ok=True)
-        (fold_dir / "fold_meta.json").write_text(json.dumps(fold, indent=2))
+    for t_id, t in enumerate(trials):
+        trial_tag = t.get("_name", f"trial{t_id:03d}")
+        trial_dir = run_dir / trial_tag
+        (trial_dir / "tb").mkdir(parents=True, exist_ok=True)
 
-        # === TRAIN: mehrere Episoden ohne Recorder ===
-        def _make(seg):
-            return build_env_segment(panel, seg, state_spec=spec, reward_kind=args.reward,
-                                     with_recorder=False, out_dir=None)
-        train_vec = DummyVecEnv([partial(_make, seg) for seg in fold["train"]])
+        # Basiskonfig für PPO holen (so wie ihr sie bisher an make_agent übergebt)
+        ppo_kwargs =  {k: v for k, v in t.items() if not k.startswith("_")}
+        # Trial-Overrides einmischen (Keys, die mit "_" beginnen, ignorieren)
+        for k, v in t.items():
+            if not k.startswith("_"):
+                ppo_kwargs[k] = v
 
-        if args.strategy == "cpcv":
-            # --- CPCV: pro Fold NEUES Modell, direkt mit train_vec bauen
-            model = make_agent(args.algo, train_vec, tensorboard_log=str(fold_dir / "tb"), seed=args.seed)
-        else:
-            # --- WF: bestehendes Modell weiterverwenden
-            # num_envs muss übereinstimmen; bei WF ist das i. d. R. der Fall.
-            model.set_env(train_vec)
+        for k, fold in enumerate(windows, 1):
+            fold_dir = trial_dir / f"fold_{k:02d}"
+            (fold_dir / "train").mkdir(parents=True, exist_ok=True)
+            (fold_dir / "test").mkdir(parents=True, exist_ok=True)
+            (fold_dir / "fold_meta.json").write_text(json.dumps(fold, indent=2))
 
-        model.learn(total_timesteps=args.total_timesteps, progress_bar=False)
-        train_vec.close()
+            # === TRAIN: mehrere Episoden ohne Recorder ===
+            train_vec = _vec_for_fold(fold, panel, spec, args.reward,
+                                      n_envs=args.n_envs, mode=args.env_mode, seed_base=args.seed + 1000 * t_id)
 
-        # ===== TEST: from_snapshots =====
-        if args.eval_mode == "from_snapshots":
-            for i, seg in enumerate(fold["test"], 1):
-                seg_dir = fold_dir / "test" / f"seg_{i:02d}"
-                env = build_env_segment(panel, seg, state_spec=spec, reward_kind=args.reward,
-                                        with_recorder=True, out_dir=seg_dir)
+            if args.strategy == "cpcv":
+                model = make_agent(args.algo, train_vec, tensorboard_log=str(fold_dir / "tb"), seed=args.seed)
+            else:
+                model.set_env(train_vec)
 
-                # Gymnasium: reset() may return (obs, info)
-                obs = _unpack_reset(env)
-                done = False
-                while not done:
-                    action, _ = model.predict(obs, deterministic=True)
-                    obs, reward, done, info = _unpack_step(env.step(action))
-                # close afterwards
-                env.close()
+            model.learn(total_timesteps=args.total_timesteps, progress_bar=False)
 
-                #Make path relative to project/data (compute_rewards expects DATA_DIR / accounting_dir)
-                try:
-                    acc_dir_rel = seg_dir.relative_to(paths.DATA_DIR)
-                    print(f"First {acc_dir_rel}")
-                except Exception:
-                    parts = seg_dir.parts
-                    if parts and parts[0].lower() == "data":
-                        acc_dir_rel = Path(*parts[1:])
-                        print(f"Second {acc_dir_rel}")
-                    else:
-                        try:
-                            acc_dir_rel = seg_dir.relative_to(Path.cwd() / "data")
-                            print(f"Thrid {acc_dir_rel}")
-                        except Exception:
-                            raise RuntimeError(
-                                f"Kann {seg_dir} nicht in einen Pfad relativ zu project/data umwandeln; prüfe run_root.")
+            try:
+                rollout_size = model.n_steps * train_vec.num_envs
+                assert rollout_size % model.batch_size == 0, \
+                    f"rollout_size={rollout_size} nicht teilbar durch batch_size={model.batch_size}"
+            except Exception:
+                pass  # falls Algo ohne diese Attribute (SAC ok, PPO hat sie normalerweise)
 
-                compute_rewards_from_snapshots(
-                    accounting_dir=acc_dir_rel,
-                    spec=RewardSpec(kind=args.reward),
-                    out_name="rewards.parquet"
-                )
+            train_vec.close()
 
-        # ===== TEST: online =====
-        else:  # online
-            online = OnlineEvaluator(kind=args.reward)
-            for i, seg in enumerate(fold["test"], 1):
-                env = build_env_segment(panel, seg, state_spec=spec, reward_kind=args.reward,
-                                        with_recorder=False, out_dir=None)
 
-                obs = _unpack_reset(env)
-                done = False
-                while not done:
-                    action, _ = model.predict(obs, deterministic=True)
-                    obs, reward, done, info = _unpack_step(env.step(action))
+            # ===== TEST: from_snapshots =====
+            if args.eval_mode == "from_snapshots":
+                for i, seg in enumerate(fold["test"], 1):
+                    y = str(seg[0])[:4]
+                    print(y)
+                    seg_dir = fold_dir / "test" / f"test_{y}"
+                    env = build_env_segment(panel, seg, state_spec=spec, reward_kind=args.reward,
+                                            with_recorder=True, out_dir=seg_dir)
 
-                    nav_t = info.get("value") if isinstance(info, dict) else None
-                    r_log = info.get("r_log") if isinstance(info, dict) else None
-                    online.update(nav_t=nav_t, r_log_t=r_log)
-                env.close()
+                    # Gymnasium: reset() may return (obs, info)
+                    obs = _unpack_reset(env)
+                    done = False
+                    while not done:
+                        action, _ = model.predict(obs, deterministic=True)
+                        obs, reward, done, info = _unpack_step(env.step(action))
+                    # close afterwards
+                    env.close()
 
-            df = online.finalize()
-            (fold_dir / "test").mkdir(exist_ok=True, parents=True)
-            df[["r_log_t", "icvar_t", "delta_mdd_t", "reward_t"]].describe().to_csv(
-                fold_dir / "test" / "summary_test.csv")
+                    #Make path relative to project/data (compute_rewards expects DATA_DIR / accounting_dir)
+                    try:
+                        acc_dir_rel = seg_dir.relative_to(paths.DATA_DIR)
+                        print(f"First {acc_dir_rel}")
+                    except Exception:
+                        parts = seg_dir.parts
+                        if parts and parts[0].lower() == "data":
+                            acc_dir_rel = Path(*parts[1:])
+                            print(f"Second {acc_dir_rel}")
+                        else:
+                            try:
+                                acc_dir_rel = seg_dir.relative_to(Path.cwd() / "data")
+                                print(f"Thrid {acc_dir_rel}")
+                            except Exception:
+                                raise RuntimeError(
+                                    f"Kann {seg_dir} nicht in einen Pfad relativ zu project/data umwandeln; prüfe run_root.")
+
+                    compute_rewards_from_snapshots(
+                        accounting_dir=acc_dir_rel,
+                        spec=RewardSpec(kind=args.reward),
+                        out_name="rewards.parquet"
+                    )
+
+            # ===== TEST: online =====
+            else:  # online
+                online = OnlineEvaluator(kind=args.reward)
+                for i, seg in enumerate(fold["test"], 1):
+                    env = build_env_segment(panel, seg, state_spec=spec, reward_kind=args.reward,
+                                            with_recorder=False, out_dir=None)
+
+                    obs = _unpack_reset(env)
+                    done = False
+                    while not done:
+                        action, _ = model.predict(obs, deterministic=True)
+                        obs, reward, done, info = _unpack_step(env.step(action))
+
+                        nav_t = info.get("value") if isinstance(info, dict) else None
+                        r_log = info.get("r_log") if isinstance(info, dict) else None
+                        online.update(nav_t=nav_t, r_log_t=r_log)
+                    env.close()
+
+                df = online.finalize()
+                (fold_dir / "test").mkdir(exist_ok=True, parents=True)
+                df[["r_log_t", "icvar_t", "delta_mdd_t", "reward_t"]].describe().to_csv(
+                    fold_dir / "test" / "summary_test.csv")
 
 if __name__ == "__main__":
     main()

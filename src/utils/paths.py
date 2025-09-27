@@ -17,7 +17,7 @@ RAW_DIR       = (BASE_DIR / _paths.get("raw", "data/raw")).resolve()
 INTERIM_DIR   = (BASE_DIR / _paths.get("interim_dir", "data/interim")).resolve()
 CLEAN_DIR     = (BASE_DIR / _paths.get("clean_dir", "data/clean")).resolve()
 RAW_DIR.mkdir(parents=True, exist_ok=True)
-INTERIM_DIR.mkdir(parents=True, exist_ok=True)
+#INTERIM_DIR.mkdir(parents=True, exist_ok=True)
 CLEAN_DIR.mkdir(parents=True, exist_ok=True)
 
 INTERIM_PANEL = (BASE_DIR / _paths.get("interim_panel", INTERIM_DIR / "panel.parquet")).resolve()

@@ -25,7 +25,7 @@ fields:                 # Rohfelder, die wir aus der API holen
 
 paths:
   raw_dir: data/raw
-  interim_dir: data/interim
+  interim_dir: data/interim/benchmark.parquet
   clean_dir: data/clean
 
 align:
