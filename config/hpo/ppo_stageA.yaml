@@ -1,3 +1,5 @@
+
+# T2 wurde gewählt und wird weiter optimiert
 - _name: T1_policy_push
   n_epochs: 12
   gae_lambda: 0.90

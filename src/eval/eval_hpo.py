@@ -4,7 +4,7 @@ from statistics import median
 import numpy as np
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
-RUN_ROOT = Path("C:/Dev/Bachelorarbeit/data/accounting/runs/hpo_stageA/ppo_log_state0_cpcv_20250927_132356")  # <- DEIN Run-Ordner
+RUN_ROOT = Path("C:/Dev/Bachelorarbeit/data/accounting/runs/hpo_stageA/ppo_log_state0_cpcv_20250928_110845")  # <- DEIN Run-Ordner
 
 K_LAST = 5  # wie viele letzte Punkte mitteln / für Trend nutzen
 

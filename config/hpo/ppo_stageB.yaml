@@ -1,0 +1,74 @@
+- _name: B1_baseline_T2
+  n_epochs: 12
+  gae_lambda: 0.90
+  vf_coef: 0.70
+  learning_rate: 0.00036
+  clip_range: 0.20
+  target_kl: 0.012
+
+- _name: B2_lr_up
+  n_epochs: 12
+  gae_lambda: 0.90
+  vf_coef: 0.70
+  learning_rate: 0.00045   # +25% vs. B1
+  clip_range: 0.20
+  target_kl: 0.012
+
+- _name: B3_lr_down
+  n_epochs: 12
+  gae_lambda: 0.90
+  vf_coef: 0.70
+  learning_rate: 0.00028   # -22% vs. B1
+  clip_range: 0.20
+  target_kl: 0.012
+  n_steps: 6144
+
+- _name: B4_clip_up
+  n_epochs: 12
+  gae_lambda: 0.90
+  vf_coef: 0.70
+  learning_rate: 0.00036
+  clip_range: 0.25
+  target_kl: 0.012
+
+- _name: B5_clip_down
+  n_epochs: 12
+  gae_lambda: 0.90
+  vf_coef: 0.70
+  learning_rate: 0.00036
+  clip_range: 0.15
+  target_kl: 0.012
+
+- _name: B6_more_epochs_tight_kl
+  n_epochs: 14            # mehr Policy-Updates
+  gae_lambda: 0.90
+  vf_coef: 0.70
+  learning_rate: 0.00036
+  clip_range: 0.20
+  target_kl: 0.010        # etwas strenger
+
+- _name: B7_longer_rollout_stronger_vf
+  n_epochs: 12
+  gae_lambda: 0.90
+  vf_coef: 0.80           # Value etwas stärker gewichten
+  learning_rate: 0.00036
+  clip_range: 0.20
+  target_kl: 0.015
+  n_steps: 6144           # längere Rollouts
+
+- _name: B8_lr_mid_clip_mid
+  n_epochs: 12
+  gae_lambda: 0.90
+  vf_coef: 0.70
+  learning_rate: 0.00040
+  clip_range: 0.22
+  target_kl: 0.012
+
+- - _name: B9_lr_down_vf_up
+- n_epochs: 12
+- gae_lambda: 0.90
+- vf_coef: 0.90
+- learning_rate: 0.00028   # -22% vs. B1
+- clip_range: 0.20
+- target_kl: 0.012
+- n_steps: 6144
