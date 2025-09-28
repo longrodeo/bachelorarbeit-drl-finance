@@ -64,11 +64,11 @@
   clip_range: 0.22
   target_kl: 0.012
 
-- - _name: B9_lr_down_vf_up
-- n_epochs: 12
-- gae_lambda: 0.90
-- vf_coef: 0.90
-- learning_rate: 0.00028   # -22% vs. B1
-- clip_range: 0.20
-- target_kl: 0.012
-- n_steps: 6144
+- _name: B9_lr_down_vf_up
+  n_epochs: 12
+  gae_lambda: 0.90
+  vf_coef: 0.90
+  learning_rate: 0.00028   # -22% vs. B1
+  clip_range: 0.20
+  target_kl: 0.012
+  n_steps: 6144

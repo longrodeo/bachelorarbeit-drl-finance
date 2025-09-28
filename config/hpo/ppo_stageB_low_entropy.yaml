@@ -1,0 +1,12 @@
+- _name: B4_clip_up_lowEnt_vf08
+  n_epochs: 12
+  gae_lambda: 0.90
+  vf_coef: 0.80
+  learning_rate: 0.00036
+  clip_range: 0.25
+  target_kl: 0.010
+  n_steps: 6144
+  use_sde: true
+  sde_sample_freq: 4
+  policy_kwargs:
+    log_std_init: -1.5
