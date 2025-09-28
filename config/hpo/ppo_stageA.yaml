@@ -29,3 +29,13 @@
   learning_rate: 0.00030
   clip_range: 0.20
   target_kl: 0.012
+
+- _name: T5_critic_gain
+  n_epochs: 12
+  learning_rate: 0.00030
+  gamma: 0.99
+  gae_lambda: 0.85
+  vf_coef: 0.80
+  clip_range: 0.20
+  target_kl: 0.012
+  n_steps: 6144

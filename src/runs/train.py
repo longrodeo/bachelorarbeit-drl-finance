@@ -168,7 +168,7 @@ def main():
         trial_dir = run_dir / trial_tag
         (trial_dir / "tb").mkdir(parents=True, exist_ok=True)
 
-        # Basiskonfig für PPO holen (so wie ihr sie bisher an make_agent übergebt)
+        # Basiskonfig für PPO holen
         ppo_kwargs =  {k: v for k, v in t.items() if not k.startswith("_")}
         # Trial-Overrides einmischen (Keys, die mit "_" beginnen, ignorieren)
         for k, v in t.items():
@@ -186,7 +186,8 @@ def main():
                                       n_envs=args.n_envs, mode=args.env_mode, seed_base=args.seed + 1000 * t_id)
 
             if args.strategy == "cpcv":
-                model = make_agent(args.algo, train_vec, tensorboard_log=str(fold_dir / "tb"), seed=args.seed)
+                model = make_agent(args.algo, train_vec, tensorboard_log=str(fold_dir / "tb"), seed=args.seed,
+                   algo_kwargs=ppo_kwargs)
             else:
                 model.set_env(train_vec)
 
