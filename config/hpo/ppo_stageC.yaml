@@ -1,0 +1,57 @@
+- _name: B4_original
+  n_epochs: 12
+  gae_lambda: 0.90
+  vf_coef: 0.70
+  learning_rate: 0.00036
+  clip_range: 0.25
+  target_kl: 0.012
+
+- _name: C1_B4
+  n_epochs: 12
+  gae_lambda: 0.95
+  vf_coef: 0.70
+  learning_rate: 0.00036
+  clip_range: 0.25
+  target_kl: 0.012
+  n_steps: 5120
+
+- _name: C2_B4
+  n_epochs: 12
+  gae_lambda: 0.90
+  vf_coef: 0.75
+  learning_rate: 0.00036
+  clip_range: 0.25
+  target_kl: 0.012
+  n_steps: 5120
+
+- _name: C3_B4
+  n_epochs: 12
+  gae_lambda: 0.90
+  vf_coef: 0.70
+  learning_rate: 0.00036
+  clip_range: 0.20
+  target_kl: 0.012
+  n_steps: 5120
+
+- _name: C4_B4
+  n_epochs: 12
+  gae_lambda: 0.90
+  vf_coef: 0.70
+  learning_rate: 0.00036
+  clip_range: 0.25
+  target_kl: 0.012
+  n_steps: 6144
+
+- _name: C5_B4
+  n_epochs: 12
+  gae_lambda: 0.95
+  vf_coef: 0.75
+  learning_rate: 0.00036
+  clip_range: 0.25
+  clip_range_vf: 0.20
+  target_kl: 0.012
+  n_steps: 5120
+  policy_kwargs:
+    net_arch:
+      pi: [256, 256]
+      vf: [256, 256, 128]
