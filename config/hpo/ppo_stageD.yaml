@@ -1,0 +1,41 @@
+- _name: D1_B4_pushKL
+  n_epochs: 12
+  gae_lambda: 0.90
+  vf_coef: 0.70
+  learning_rate: 0.00040     # +10% Tempo
+  clip_range: 0.25
+  target_kl: 0.016           # KL-Ziel leicht rauf
+  n_steps: 4096              # nicht verlängern, damit KL steigt
+
+- _name: D2_B4_ev_clip
+  n_epochs: 12
+  gae_lambda: 0.95           # EV-Hilfe
+  vf_coef: 0.75              # etwas stärkerer Critic (ohne 0.8/0.9)
+  learning_rate: 0.00036
+  clip_range: 0.25
+  clip_range_vf: 0.20        # Value-Clipping an
+  target_kl: 0.012
+  n_steps: 5120              # moderat längere Rollouts
+
+- _name: D3_B4_gamma099
+  n_epochs: 12
+  gae_lambda: 0.95
+  vf_coef: 0.70
+  learning_rate: 0.00036
+  clip_range: 0.25
+  target_kl: 0.012
+  gamma: 0.99                 # kürzere Ziel-Horizonte → EV oft ↑
+  n_steps: 5120
+
+- _name: D4_B4_lowEntropy
+  n_epochs: 12
+  gae_lambda: 0.90
+  vf_coef: 0.70
+  learning_rate: 0.00036
+  clip_range: 0.25
+  target_kl: 0.012
+  n_steps: 5120
+  use_sde: true
+  sde_sample_freq: 4
+  policy_kwargs:
+    log_std_init: -1.5        # Entropy fällt verlässlicher

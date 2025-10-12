@@ -1,28 +1,30 @@
+# C:\Dev\Bachelorarbeit\src\eval\eval_hpo.py
 from pathlib import Path
-import glob
 from statistics import median
 import numpy as np
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+import glob
 
-RUN_ROOT = Path("C:/Dev/Bachelorarbeit/data/accounting/runs/hpo_stageB_2/ppo_log_state0_cpcv_20250928_195426")  # <- DEIN Run-Ordner
+RUN_ROOT = Path(r"C:\Dev\Bachelorarbeit\data\accounting\runs\hpo_stageC\ppo_log_state0_cpcv_20250929_190212")
+K_LAST = 5  # wie viele letzte Punkte mitteln / für Trend
 
-K_LAST = 5  # wie viele letzte Punkte mitteln / für Trend nutzen
-
-def load_events(tb_dir):
-    ev_files = sorted(glob.glob(str(tb_dir / "**/events.*"), recursive=True))
+def load_events_from_dir(dir_with_events: Path):
+    ev_files = sorted(glob.glob(str(dir_with_events / "events.out.tfevents.*")))
     if not ev_files:
         return None
-    ea = EventAccumulator(ev_files[-1])
+    ea = EventAccumulator(str(dir_with_events), size_guidance={"scalars": 0})
     ea.Reload()
     return ea
 
 def last_k(ea, tag, k=K_LAST):
-    if tag not in ea.Tags().get('scalars', []):
+    tags = ea.Tags().get('scalars', [])
+    if tag not in tags:
         return None, None
-    xs = [x.step for x in ea.Scalars(tag)]
-    ys = [x.value for x in ea.Scalars(tag)]
-    if not ys:
+    vals = ea.Scalars(tag)
+    if not vals:
         return None, None
+    xs = [v.step for v in vals]
+    ys = [v.value for v in vals]
     k = min(k, len(ys))
     return xs[-k:], ys[-k:]
 
@@ -34,22 +36,36 @@ def slope_last_k(ea, tag, k=K_LAST):
     xs, ys = last_k(ea, tag, k)
     if ys is None or len(ys) < 2:
         return None
-    # einfache lineare Regression (Steigung)
-    x = np.array(xs, dtype=float)
-    y = np.array(ys, dtype=float)
+    x = np.asarray(xs, dtype=float)
+    y = np.asarray(ys, dtype=float)
     A = np.vstack([x, np.ones_like(x)]).T
     m, _ = np.linalg.lstsq(A, y, rcond=None)[0]
     return float(m)
 
+def find_fold_tb_dirs(trial_dir: Path):
+    """
+    Finde für ein Trial alle TB-Verzeichnisse robust:
+    - akzeptiert fold_*/tb, fold_*/tb_*, fold_*/sb3_log*, usw.
+    """
+    tb_dirs = []
+    for fold_dir in sorted(trial_dir.glob("fold_*")):
+        # nimm irgendeinen Unterordner, der Events enthält
+        candidates = list(fold_dir.glob("**/events.out.tfevents.*"))
+        if candidates:
+            tb_dirs.append(candidates[-1].parent)  # Verzeichnis, das die Event-Datei enthält
+    return tb_dirs
+
 rows = []
-for trial in sorted([p for p in RUN_ROOT.iterdir() if p.is_dir()]):
+# Trials = alle direkten Unterordner im RUN_ROOT, die keine TB-Meta-Dateien sind
+for trial in sorted([p for p in RUN_ROOT.iterdir() if p.is_dir() and p.name not in ("tb",)]):
+    tb_dirs = find_fold_tb_dirs(trial)
     fold_metrics = []
-    for tb in sorted(trial.glob("fold_*/tb")):
-        ea = load_events(tb)
+    for tb_dir in tb_dirs:
+        ea = load_events_from_dir(tb_dir)
         if ea is None:
             continue
 
-        # Reward-Level & Trend (Eval bevorzugt, sonst Rollout)
+        # Score (Eval bevorzugt, sonst Rollout)
         score = mean_last_k(ea, "eval/ep_rew_mean")
         if score is None:
             score = mean_last_k(ea, "rollout/ep_rew_mean")
@@ -60,16 +76,15 @@ for trial in sorted([p for p in RUN_ROOT.iterdir() if p.is_dir()]):
         # Lern-Dynamik
         kl   = mean_last_k(ea, "train/approx_kl")
         clip = mean_last_k(ea, "train/clip_fraction")
-        ent  = mean_last_k(ea, "train/entropy_loss")
-        stdv = mean_last_k(ea, "train/std")
-        ev   = mean_last_k(ea, "train/explained_variance")
+        ent  = mean_last_k(ea, "train/entropy_loss") or mean_last_k(ea, "train/entropy")
+        stdv = mean_last_k(ea, "train/std") or mean_last_k(ea, "train/approx_std")
+        ev   = mean_last_k(ea, "train/explained_variance") or mean_last_k(ea, "rollout/explained_variance")
         vlos = mean_last_k(ea, "train/value_loss")
 
         if score is not None:
             fold_metrics.append((score, trend, kl, clip, ent, stdv, ev, vlos))
 
     if fold_metrics:
-        # über Folds aggregieren
         S, T, KL, CF, EN, ST, EV, VL = zip(*fold_metrics)
         iqr_S = np.subtract(*np.percentile(S, [75, 25]))
         pos_trend = sum(1 for t in T if (t is not None and t > 0))
@@ -78,17 +93,17 @@ for trial in sorted([p for p in RUN_ROOT.iterdir() if p.is_dir()]):
             "score_med": float(median(S)),
             "score_iqr": float(iqr_S),
             "trend_med": float(median([t for t in T if t is not None])) if any(t is not None for t in T) else None,
-            "kl_med":    float(median([x for x in KL if x is not None])) if any(KL) else None,
-            "clip_med":  float(median([x for x in CF if x is not None])) if any(CF) else None,
-            "ent_med":   float(median([x for x in EN if x is not None])) if any(EN) else None,
-            "std_med":   float(median([x for x in ST if x is not None])) if any(ST) else None,
-            "ev_med":    float(median([x for x in EV if x is not None])) if any(EV) else None,
-            "vloss_med": float(median([x for x in VL if x is not None])) if any(VL) else None,
+            "kl_med":    float(median([x for x in KL if x is not None])) if any(x is not None for x in KL) else None,
+            "clip_med":  float(median([x for x in CF if x is not None])) if any(x is not None for x in CF) else None,
+            "ent_med":   float(median([x for x in EN if x is not None])) if any(x is not None for x in EN) else None,
+            "std_med":   float(median([x for x in ST if x is not None])) if any(x is not None for x in ST) else None,
+            "ev_med":    float(median([x for x in EV if x is not None])) if any(x is not None for x in EV) else None,
+            "vloss_med": float(median([x for x in VL if x is not None])) if any(x is not None for x in VL) else None,
             "folds": len(fold_metrics),
             "pos_trend_folds": pos_trend
         })
 
-# Ranking: erst Score, dann Trend, dann EV
+# Ranking: nach score_med, dann trend_med, dann ev_med
 rows.sort(key=lambda r: (
     r["score_med"],
     (r["trend_med"] if r["trend_med"] is not None else -1e9),
