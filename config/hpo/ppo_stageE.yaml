@@ -1,0 +1,40 @@
+- _name: E1_B4_ev_clip # kombiniere Parameter der Setups in Stage D Ziel Lernrate hoch lassen und gleichzeitig EV über 0 erreichen
+  n_epochs: 12
+  gae_lambda: 0.95
+  vf_coef: 0.75
+  learning_rate: 0.00040
+  clip_range: 0.25
+  clip_range_vf: 0.20
+  target_kl: 0.016
+  gamma: 0.99
+  n_steps: 4096
+  batch_size: 256 #Critic robuster machen
+
+
+- _name: E2_B4_lowEntropy_over_std
+  n_epochs: 12
+  gae_lambda: 0.95
+  vf_coef: 0.75
+  learning_rate: 0.00040
+  clip_range: 0.25
+  clip_range_vf: 0.20
+  target_kl: 0.016
+  gamma: 0.99
+  n_steps: 4096
+  batch_size: 256 #Critic robuster machen
+  use_sde: true
+  sde_sample_freq: 4
+  ent_coef: 0.0002
+
+- _name: E3_B4_low_Entropy_over_ent_coef # Versuch die Entropy über einen geringeren Entropy Koeffzienten besser in den Griff zu bekommen
+  n_epochs: 12
+  gae_lambda: 0.95
+  vf_coef: 0.75
+  learning_rate: 0.00040
+  clip_range: 0.25
+  clip_range_vf: 0.20
+  target_kl: 0.016
+  gamma: 0.99
+  n_steps: 4096
+  batch_size: 256 #Critic robuster machen
+  ent_coef: 0.0005
