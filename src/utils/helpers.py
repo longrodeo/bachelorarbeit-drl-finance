@@ -1,49 +1,41 @@
 # ---------------------------------------------------------------------------
-# Datei: src/utils/helpers.py
-# Zweck: Sammlung kleiner Hilfsfunktionen für deterministische Experimente
-#   (Seed-Setzung) und einheitliches Logging.
-# Hauptfunktionen: ``set_seed`` und ``get_logger``.
-# Abhängigkeiten: Standardbibliotheken ``logging``, ``os``, ``random`` sowie
-#   ``numpy`` und optional ``torch``.
-# Typische Fehler: fehlender PyTorch-Import oder mehrfaches Hinzufügen von
-#   Logger-Handlern.
+# Utility helpers for deterministic experiments and consistent logging setup.
+# Includes seed initialization across libraries and an idempotent logger factory.
+# Also provides utilities to serialize complex objects for manifest snapshots.
 # ---------------------------------------------------------------------------
-from __future__ import annotations  # zukünftige Typ-Hints ohne String-Literale
-import logging, os, random  # Logging-Framework, Umgebungsvariablen, Zufall
-from typing import Optional  # optionaler Parameter-Typ für Pfadangaben
-import numpy as np  # numerische Zufallsgeneratoren
+from __future__ import annotations  # allow postponed evaluation of annotations
+import logging, os, random  # core modules for logging configuration and entropy
+from typing import Optional  # optional type hints for file parameters
+import numpy as np  # numerical random number generation utilities
 from pathlib import Path
 
 def set_seed(seed: int = 42, *, deterministic_torch: bool = True) -> None:
-    """
-    Setzt Seeds für Python, NumPy und optional PyTorch.
-    Hinweis: PYTHONHASHSEED wirkt formal beim Interpreter-Start; das Setzen hier
-    hilft v. a. für ggf. gestartete Subprozesse (und schadet nicht).
-    
-    Parameters
-    ----------
-    seed : int
-        Basiswert für alle Zufallsgeneratoren.
-    deterministic_torch : bool, optional
-        Erzwingt deterministisches Verhalten bei ``torch`` (CuDNN).
-    """
-    # Python/OS
-    os.environ["PYTHONHASHSEED"] = str(seed)  # Hashseed für Stabilität setzen
-    random.seed(seed)  # Python-eigenen PRNG deterministisch machen
+    """Synchronize pseudo random generators for reproducible experiments.
 
-    # NumPy
-    np.random.seed(seed)  # Numpy-PRNG auf Seed einstellen
+    Args:
+        seed: Base value used across Python's random module and NumPy.
+        deterministic_torch: When ``True`` the optional torch configuration
+            enforces deterministic CuDNN execution, potentially at a speed cost.
+    """
 
-    # Torch (optional)
-    try:  # Import kann fehlschlagen, wenn Torch nicht installiert ist
-        import torch  # schwere Bibliothek für Deep Learning
-        torch.manual_seed(seed)  # CPU-Seeds setzen
-        torch.cuda.manual_seed_all(seed)  # GPU-Seeds setzen (alle Geräte)
-        if deterministic_torch:  # Option für deterministische CuDNN-Läufe
-            torch.backends.cudnn.deterministic = True  # deterministische Algorithmen
-            torch.backends.cudnn.benchmark = False  # keine autotune-Heuristik
+    # Align Python's hashing and random module with the provided seed.
+    os.environ["PYTHONHASHSEED"] = str(seed)  # ensure deterministic hashing
+    random.seed(seed)  # set the global Python PRNG seed
+
+    # Align NumPy's random generator with the same seed for vectorized sampling.
+    np.random.seed(seed)
+
+    # Torch is optional; configure it only when available in the environment.
+    try:
+        import torch  # heavy-weight library for deep learning workloads
+
+        torch.manual_seed(seed)  # set CPU random generator
+        torch.cuda.manual_seed_all(seed)  # set GPU generators across devices
+        if deterministic_torch:
+            torch.backends.cudnn.deterministic = True  # deterministic kernels
+            torch.backends.cudnn.benchmark = False  # disable autotune heuristics
     except ImportError:
-        pass  # Torch noch nicht installiert → ignorieren
+        pass  # silently skip when torch is not installed
 
 def get_logger(
     name: str = "BA",
@@ -53,104 +45,118 @@ def get_logger(
     fmt: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     datefmt: str = "%Y-%m-%d %H:%M:%S",
 ) -> logging.Logger:
+    """Provide an idempotent logger with optional file output.
+
+    Args:
+        name: Logical logger name used for retrieval and configuration.
+        level: Minimum severity accepted by the logger.
+        to_file: Optional path to attach a file handler for persistent logs.
+        fmt: Formatter string describing the emitted record layout.
+        datefmt: Timestamp format applied within the formatter.
+
+    Returns:
+        A configured ``logging.Logger`` instance without duplicate handlers.
     """
-    Idempotenter Logger:
-    - StreamHandler (STDOUT) wird genau einmal sichergestellt.
-    - Optional: FileHandler für `to_file` wird genau einmal (pro Pfad) sichergestellt.
-    - Keine doppelten Handler; spätere Aufrufe aktualisieren Level/Formatter.
-    
-    Parameters
-    ----------
-    name : str
-        Logger-Name.
-    level : int
-        Logging-Level (z. B. ``logging.INFO``).
-    to_file : str | None
-        Optionaler Pfad für Logdatei.
-    fmt : str
-        Format-String für Logausgaben.
-    datefmt : str
-        Datumsformat der Logausgabe.
 
-    Returns
-    -------
-    logging.Logger
-        Konfiguriertes Logger-Objekt ohne doppelte Handler.
-    """
-    logger = logging.getLogger(name)  # existierenden oder neuen Logger holen
-    logger.setLevel(level)  # Mindestlevel setzen
-    logger.propagate = False  # keine Weiterleitung an Root-Logger
+    logger = logging.getLogger(name)  # retrieve or create the named logger
+    logger.setLevel(level)  # enforce the minimum severity threshold
+    logger.propagate = False  # avoid double logging through the root logger
 
-    formatter = logging.Formatter(fmt=fmt, datefmt=datefmt)  # Format definieren
+    formatter = logging.Formatter(fmt=fmt, datefmt=datefmt)
 
-    # 1) StreamHandler sicherstellen (ohne FileHandler—der ist Subklasse von StreamHandler)
-    stream_handlers = [  # Filter existierender StreamHandler ohne FileHandler
+    # Ensure exactly one plain StreamHandler that targets stdout.
+    stream_handlers = [
         h for h in logger.handlers
         if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
     ]
-    if not stream_handlers:  # falls keiner vorhanden, neu anlegen
-        sh = logging.StreamHandler()  # Ausgabe auf STDOUT
-        sh.setFormatter(formatter)  # Format zuweisen
-        sh.setLevel(level)  # Level setzen
-        logger.addHandler(sh)  # Handler anhängen
-    else:  # existierende Handler anpassen
+    if not stream_handlers:
+        sh = logging.StreamHandler()  # primary stream handler for console output
+        sh.setFormatter(formatter)
+        sh.setLevel(level)
+        logger.addHandler(sh)
+    else:
         for h in stream_handlers:
-            h.setLevel(level)  # Level aktualisieren
-            h.setFormatter(formatter)  # Format aktualisieren
+            h.setLevel(level)
+            h.setFormatter(formatter)
 
-    # 2) FileHandler sicherstellen (nur wenn gewünscht und noch nicht vorhanden für genau diesen Pfad)
-    if to_file:  # Logging zusätzlich in Datei schreiben
-        path = os.path.abspath(to_file)  # absoluter Pfad für Vergleich
-        file_handlers = [  # existierende FileHandler mit identischem Pfad suchen
+    # Attach exactly one file handler per target path whenever requested.
+    if to_file:
+        path = os.path.abspath(to_file)  # normalize path for comparisons
+        file_handlers = [
             h for h in logger.handlers
             if isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", None) == path
         ]
-        if not file_handlers:  # wenn noch keiner existiert, neu anlegen
-            fh = logging.FileHandler(path, encoding="utf-8")  # Datei-Handler
-            fh.setFormatter(formatter)  # Format zuweisen
-            fh.setLevel(level)  # Level setzen
-            logger.addHandler(fh)  # Handler hinzufügen
-        else:  # vorhandene FileHandler aktualisieren
+        if not file_handlers:
+            fh = logging.FileHandler(path, encoding="utf-8")  # dedicated file output
+            fh.setFormatter(formatter)
+            fh.setLevel(level)
+            logger.addHandler(fh)
+        else:
             for h in file_handlers:
-                h.setLevel(level)  # Level aktualisieren
-                h.setFormatter(formatter)  # Format aktualisieren
+                h.setLevel(level)
+                h.setFormatter(formatter)
 
-    return logger  # fertig konfiguriertes Logger-Objekt zurückgeben
+    return logger
 
 def _jsonable(model, x):
-    # primitive
+    """Transform configuration values into JSON-serializable representations.
+
+    Args:
+        model: Optional model reference used to query dynamic attributes.
+        x: Arbitrary object to be serialized when building manifest snapshots.
+
+    Returns:
+        A JSON-compatible primitive or structure describing the provided value.
+    """
+
+    # Primitives and ``None`` can be returned unchanged.
     if isinstance(x, (int, float, str, bool)) or x is None:
         return x
-    # NumPy-Skalare
+
+    # Convert NumPy scalar types to their native Python equivalents.
     try:
         import numpy as np
         if isinstance(x, (np.integer, np.floating)):
             return x.item()
     except Exception:
         pass
-    name = getattr(x, "__class__", type(x)).__name__
-    # SB3 Schedules (learning_rate etc.)
+
+    name = getattr(x, "__class__", type(x)).__name__  # capture descriptive type name
+
+    # Stable-Baselines3 schedules expose callable learning rate helpers.
     if "Schedule" in name or callable(x):
         try:
-            return {"type": name, "current": float(model.policy.optimizer.param_groups[0]["lr"])}
+            lr_group = model.policy.optimizer.param_groups[0]
+            return {"type": name, "current": float(lr_group["lr"])}
         except Exception:
             try:
-                return {"type": name, "current": float(x(1.0))}  # initialer LR bei progress=1.0
+                return {"type": name, "current": float(x(1.0))}  # evaluate at progress=1.0
             except Exception:
                 return {"type": name}
-    # SB3 TrainFreq
+
+    # Translate SB3 ``TrainFreq`` objects to a concise dictionary.
     if name == "TrainFreq":
         n = getattr(x, "n", getattr(x, "frequency", None))
         unit = getattr(x, "unit", None)
         return {"n": int(n) if n is not None else None, "unit": str(unit)}
-    # Fallback
+
+    # Fallback to string conversion for unknown objects.
     return str(x)
 
 def write_run_manifest(run_dir, algo, model, env, seed, total_timesteps, tensorboard_log=None, deep=False):
+    """Persist a lightweight JSON manifest describing the current training run.
+
+    Args:
+        run_dir: Target directory to store the manifest and optional git diff.
+        algo: Algorithm identifier or instance name captured for reference.
+        model: Trained Stable-Baselines3 model supplying hyperparameters.
+        env: Environment instance used during training for metadata extraction.
+        seed: Random seed applied to the experiment for reproducibility.
+        total_timesteps: Number of timesteps the agent was trained for.
+        tensorboard_log: Optional TensorBoard logging directory.
+        deep: When ``True`` the manifest includes git metadata and working diff.
     """
-    Minimaler, wissenschaftlicher Run-Snapshot als JSON.
-    Speichert KEINE großen Artefakte. Optional: Git-Status + Diff.
-    """
+
     import json, sys, platform, subprocess
     import torch, stable_baselines3 as sb3, gymnasium as gym
     from datetime import datetime
@@ -158,7 +164,7 @@ def write_run_manifest(run_dir, algo, model, env, seed, total_timesteps, tensorb
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    # --- Basis ---
+    # Core runtime information about environment, device, and versions.
     cfg = {
         "ts": datetime.now().isoformat(timespec="seconds"),
         "algo": str(algo),
@@ -175,13 +181,13 @@ def write_run_manifest(run_dir, algo, model, env, seed, total_timesteps, tensorb
         },
     }
 
-    # --- Algo-Hyperparameter (kompakt, robust) ---
+    # Compact hyperparameter snapshot keyed by algorithm-specific attributes.
     ppo_keys = ["n_steps","batch_size","n_epochs","gamma","gae_lambda","clip_range","ent_coef","vf_coef","max_grad_norm","learning_rate","target_kl"]
     sac_keys = ["batch_size","gamma","tau","train_freq","gradient_steps","learning_starts","buffer_size","ent_coef","learning_rate"]
     keys = ppo_keys if str(algo).lower() == "ppo" else sac_keys
     cfg["algo_kwargs"] = {k: _jsonable(model, getattr(model, k)) for k in keys if hasattr(model, k)}
 
-    # --- Policy/Extractor-Info ---
+    # Capture policy architecture details when available.
     try:
         cfg["policy"] = {
             "name": getattr(model, "policy_class", type(getattr(model, "policy", None))).__name__,
@@ -190,7 +196,7 @@ def write_run_manifest(run_dir, algo, model, env, seed, total_timesteps, tensorb
     except Exception:
         pass
 
-    # --- Spaces & Datenfenster (falls vorhanden) ---
+    # Collect environment metadata such as spaces and available dataset hints.
     try:
         u = env.unwrapped
     except Exception:
@@ -213,13 +219,12 @@ def write_run_manifest(run_dir, algo, model, env, seed, total_timesteps, tensorb
             data_meta["n_assets"] = int(getattr(port, "n_assets", 0))
     except Exception:
         pass
-    # optional: Reward-/Kosten-Flags, wenn das Env sie anbietet
     for fld in ("reward_kind","fee_bps","vol_targeting"):
         if hasattr(u, fld):
             data_meta[fld] = getattr(u, fld)
     cfg["data"] = data_meta
 
-    # --- (Optional) Git-Infos, rein READ-ONLY ---
+    # Optionally append git state for reproducibility and audit purposes.
     if deep:
         try:
             cfg["git_commit"] = subprocess.check_output(["git","rev-parse","HEAD"]).decode().strip()
@@ -229,7 +234,6 @@ def write_run_manifest(run_dir, algo, model, env, seed, total_timesteps, tensorb
             cfg["git_dirty"] = bool(subprocess.check_output(["git","status","--porcelain"]).strip())
         except Exception:
             cfg["git_dirty"] = None
-        # Diff nur speichern, wenn dirty → verhindert Datenmüll
         if cfg.get("git_dirty"):
             try:
                 diff_path = run_dir / f"patch_{cfg.get('git_commit') or 'working'}.diff"
@@ -239,5 +243,5 @@ def write_run_manifest(run_dir, algo, model, env, seed, total_timesteps, tensorb
             except Exception:
                 cfg["git_diff_file"] = None
 
-    # --- Schreiben ---
+    # Persist the manifest configuration to disk in a stable JSON format.
     (run_dir / "config.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
