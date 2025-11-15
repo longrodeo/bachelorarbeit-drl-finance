@@ -18,7 +18,7 @@ def set_seed(seed: int = 42, *, deterministic_torch: bool = True) -> None:
     """
     Setzt Seeds für Python, NumPy und optional PyTorch.
     Hinweis: PYTHONHASHSEED wirkt formal beim Interpreter-Start; das Setzen hier
-    hilft v. a. für ggf. gestartete Subprozesse (und schadet nicht).
+    hilft v. a. für ggf. gestartete Subprozesse.
     
     Parameters
     ----------
