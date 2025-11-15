@@ -1,167 +1,147 @@
-# ---------------------------------------------------------------------------
-# Datei: src/data/build_clean.py
-# Zweck: Kombiniert das INTERIM-Panel mit technischen Indikatoren. Ergebnis ist die CLEAN-Stufe.
-# Hauptfunktionen: ``_build_cash_asset`` erzeugt das Kunst-Asset, ``build_clean_data``
-#   berechnet Features und vereinigt alles, ``write_clean_manifest`` schreibt
-#   Metadaten.
-# Ein-/Ausgabe: MultiIndex-Panel ``(date, asset)`` → erweitertes Feature-Panel
-#   sowie optionale Parquet/Manifest-Dateien.
-# Abhängigkeiten: ``pandas``, ``numpy`` sowie eigene Feature-Module; Stolpersteine
-#   sind falsche Datentypen.
-# ---------------------------------------------------------------------------
-"""
-Erzeugt das finale Feature-Panel (CLEAN) inklusive synthetischem CASH-Asset.
-Verknüpft Preisdaten mit technischen Indikatoren und speichert optional
-Parquet-Dateien sowie ein Manifest. Abhängigkeiten reichen von NumPy/Pandas bis
-zu eigenen Feature-Modulen. Typische Fehler: falsche Datentypen oder bereits
-vorhandenes CASH-Asset im Input.
-"""
+# -----------------------------------------------------------------------------
+# Constructs the CLEAN feature panel by enriching INTERIM prices with technical
+# indicators, synthesising a cash asset, and persisting data alongside a
+# metadata manifest for downstream consumption.
+# -----------------------------------------------------------------------------
 
-# `from __future__`` erlaubt spätere Typreferenzen ohne String-Literale
-from __future__ import annotations
-# `Optional``-Alias für optionale Parameter bei Manifest/Output-Pfaden
+"""Build the CLEAN stage feature panel and accompanying metadata artifacts."""
+
+from __future__ import annotations  # allow forward references in type hints
 from typing import Optional, Hashable
-# Metainformationen über Python-Version usw. für Manifest
-import platform  # Versionsinfo fürs Manifest
-import pandas as pd  # Datenverarbeitung
-from pathlib import Path  # Pfad-Manipulation
+import platform  # provide runtime metadata for the manifest
+import pandas as pd
+from pathlib import Path
 
+from src.utils.parquet_io import save_parquet  # resilient Parquet writer with engine fallbacks
+from src.utils.manifest import write_manifest, file_summary, current_commit_short  # manifest utilities
 
-# Stabiler Parquet-Schreiber mit Engine-Fallbacks
-from src.utils.parquet_io import save_parquet  # stabiler IO-Wrapper
-# Manifest-Helfer für Prüfsummen und Commit-Referenzen
-from src.utils.manifest import write_manifest, file_summary, current_commit_short  # Manifest-Helfer
-
-# Feature-Funktionen aus euren Modulen
 from src.features.basic_indicator import (
     returns,
     corwin_schultz_beta,
     corwin_schultz_gamma,
     corwin_schultz_alpha,
-    becker_parkinson_sigma,     # Volaproxy
-    corwin_schultz_spread_sanitized,      # finaler Spread
+    becker_parkinson_sigma,
+    corwin_schultz_spread_sanitized,
 )
-# Technische Indikatoren zur Trend-/Volatilitätsanalyse
 from src.features.technical_indicators import (
-    average_dollar_volume,            # Umsatzbasierte Liquidität
-    simple_moving_average,            # Gleichgewichteter gleitender Mittelwert
-    exponential_moving_average,       # EMA mit stärkerem Gewicht auf jüngste Werte
-    relative_strength_index,          # Momentum-Oszillator (0-100)
-    moving_average_convergence_divergence,  # Trendfolger mit zwei EMAs
-    bollinger,                        # Bänder auf Basis SMA und StdAbw
-    commodity_channel_index,          # Abweichung vom gleitenden Mittel
-    average_directional_index,        # Trendstärke via +DI/-DI
+    average_dollar_volume,
+    simple_moving_average,
+    exponential_moving_average,
+    relative_strength_index,
+    moving_average_convergence_divergence,
+    bollinger,
+    commodity_channel_index,
+    average_directional_index,
 )
 
 
 def _downcast_feature_dtypes(df: pd.DataFrame) -> pd.DataFrame:
-    """Speicherfreundliche Datentypen für Feature-Spalten setzen."""
-    for c in df.columns:  # jede Spalte einzeln prüfen
+    """Downcast numeric feature columns to memory-friendly dtypes."""
+    for c in df.columns:  # inspect every column individually
         if pd.api.types.is_float_dtype(df[c]):
-            df[c] = df[c].astype("float32")  # Float‑Features auf 32 Bit
+            df[c] = df[c].astype("float32")  # compress floating point features to 32 bit
         elif pd.api.types.is_integer_dtype(df[c]):
-            df[c] = df[c].astype("int64")  # int64 für Mengen/Volumen
-    return df  # DataFrame mit optimierten Datentypen zurückgeben
+            df[c] = df[c].astype("int64")  # ensure integer-like columns use int64 for stability
+    return df  # return DataFrame with adjusted dtypes
+
 
 def _fmt_label(k: Hashable) -> str:
+    """Normalise an asset label into a string representation."""
     return "/".join(map(str, k)) if isinstance(k, tuple) else str(k)
 
 
 def build_clean_data(
     prices: pd.DataFrame,
     out_path: Optional[str] = None,
-    cs_sample_length: int = 2, # Corwin–Schultz: Spanne (typisch 1–2)
- ) -> pd.DataFrame:
-    """Feature-Panel mit technischen Kennzahlen und CASH-Asset erzeugen.
+    cs_sample_length: int = 2,  # Corwin–Schultz estimation window (typically 1–2)
+) -> pd.DataFrame:
+    """Create the CLEAN feature panel with technical indicators and cash asset.
 
     Parameters
     ----------
     prices : pd.DataFrame
-        Panel ``(date, asset)`` mit Rohpreisen.
-    risk_free_annual : pd.Series
-        Jahreszins pro Tag (dezimal, bereits auf Sessions ausgerichtet).
+        Input panel indexed by (date, asset) containing price information.
     out_path : str | None
-        Optionaler Speicherpfad.
+        Optional path to persist the resulting feature panel.
     cs_sample_length : int
-        Fenster für Corwin–Schultz-Spread-Schätzung.
+        Window length for the Corwin–Schultz spread estimation.
 
     Returns
     -------
     pd.DataFrame
-        Vollständiges Feature-Panel inklusive CASH.
+        Fully populated feature panel including the synthetic cash asset.
     """
-    # Input-Checks
     if not isinstance(prices.index, pd.MultiIndex) or prices.index.names != ["date", "asset"]:
-        raise ValueError("prices muss MultiIndex mit Indexnamen ['date','asset'] besitzen.")
+        raise ValueError("prices must be a MultiIndex with index names ['date','asset'].")
 
+    prices = prices.sort_index()  # ensure chronological ordering across all assets
+    frames = []  # collects per-asset DataFrames prior to concatenation
 
-    prices = prices.sort_index()  # sicherstellen, dass Daten zeitlich sortiert sind
-    frames = []  # Sammelliste für Asset-DataFrames
+    # --- Non-cash assets ---
+    for asset, df_asset in prices.groupby(level="asset", sort=False):  # iterate by asset symbol
+        px = df_asset.droplevel("asset").sort_index()  # obtain the single-asset time series
 
-    # --- Nicht-CASH Assets ---
-    for asset, df_asset in prices.groupby(level="asset", sort=False):  # iteriere je Asset
-        px = df_asset.droplevel("asset").sort_index()  # reine Ein-Asset-Serie
+        # Core features
+        daily_ret = returns(px["adj_close"], kind="log")  # logarithmic returns per session
+        adv20 = average_dollar_volume(px["close"], px["volume"], window=20)  # liquidity proxy
 
-        # Core-Features
-        daily_ret = returns(px["adj_close"], kind="log")  # logarithmische Renditen
-        adv20 = average_dollar_volume(px["close"], px["volume"], window=20)  # Liquidität
-
-        beta = corwin_schultz_beta(px["high"], px["low"], sample_length=cs_sample_length)  # Spread-Proxies
+        beta = corwin_schultz_beta(px["high"], px["low"], sample_length=cs_sample_length)  # spread proxy component
         gamma = corwin_schultz_gamma(px["high"], px["low"])
-        sigma_bp = becker_parkinson_sigma(beta, gamma)  # Volatilität aus High/Low
+        sigma_bp = becker_parkinson_sigma(beta, gamma)  # volatility estimate from high/low range
 
         alpha = corwin_schultz_alpha(beta, gamma)
 
         CRYPTO_BASES = {"BTC-USD", "ETH-USD"}
 
         def _is_crypto_label(asset) -> bool:
+            """Detect whether the asset label corresponds to a crypto pair."""
             s = "/".join(map(str, asset)) if isinstance(asset, tuple) else str(asset)
             base = s.split("-")[0].upper()
             return base in CRYPTO_BASES or s.endswith("-USD")
 
         if _is_crypto_label(asset):
-            # Konstante, konservative Crypto-Kosten (30 bp), optional glätten
+            # Conservative static crypto trading cost assumption (30 bps)
             spread_cs = pd.Series(0.0030, index=px.index, dtype=float)
         else:
-            # Sanitized CS
+            # Sanitised Corwin–Schultz spread with rolling smoothing and floor
             spread_cs = corwin_schultz_spread_sanitized(alpha, roll=5, floor=1e-4)
 
-        # Debug: wie viel alpha <= 0?  (einmalig ok)
+        # Debug helper retained for reference on negative alpha ratios
         """neg = int((alpha <= 0).sum())
         tot = int(alpha.shape[0])
         print(f"[CS] {asset}: alpha<=0 = {neg}/{tot} ({neg / tot:.1%})")"""
 
-        # TA-Features
-        sma20 = simple_moving_average(px["close"], 20)  # kurzfristiger Trend
-        sma60 = simple_moving_average(px["close"], 60)  # längerfristiger Trend
-        ema12 = exponential_moving_average(px["close"], 12)  # schnell reagierend
-        ema26 = exponential_moving_average(px["close"], 26)  # träge EMA
-        rsi14 = relative_strength_index(px["close"], 14)  # Momentummaß
+        # Technical indicator features
+        sma20 = simple_moving_average(px["close"], 20)  # short-term trend
+        sma60 = simple_moving_average(px["close"], 60)  # medium-term trend
+        ema12 = exponential_moving_average(px["close"], 12)  # fast exponential average
+        ema26 = exponential_moving_average(px["close"], 26)  # slow exponential average
+        rsi14 = relative_strength_index(px["close"], 14)  # momentum oscillator
         macd_line, macd_signal, macd_hist = moving_average_convergence_divergence(px["close"], 12, 26, 9)
-        boll_mid, boll_up, boll_lo, boll_bw = bollinger(px["close"], 20, 2.0)  # Bollinger-Bänder
+        boll_mid, boll_up, boll_lo, boll_bw = bollinger(px["close"], 20, 2.0)  # Bollinger bands and bandwidth
         cci20 = commodity_channel_index(px["high"], px["low"], px["close"], 20)
         adx_df = average_directional_index(px["high"], px["low"], px["close"], 14)
 
         features = pd.DataFrame(
             {
-                # Rohschema
-                "open": px["open"],  # Eröffnungskurs
-                "high": px["high"],  # Tageshoch
-                "low": px["low"],    # Tagestief
-                "close": px["close"],  # Schlusskurs
-                "adj_open": px["adj_open"], # bereinigter Kurs
-                "adj_close": px["adj_close"],  # bereinigter Kurs
-                "volume": px["volume"].astype("float64"),  # Handelsvolumen
-                "dividends": px["dividends"],  # ausgezahlte Dividenden
-                "stock_splits": px["stock_splits"],  # Splitfaktor
+                # Raw schema
+                "open": px["open"],  # session open price
+                "high": px["high"],  # session high price
+                "low": px["low"],    # session low price
+                "close": px["close"],  # session close price
+                "adj_open": px["adj_open"],  # adjusted open price
+                "adj_close": px["adj_close"],  # adjusted close price
+                "volume": px["volume"].astype("float64"),  # trading volume
+                "dividends": px["dividends"],  # cash dividends paid
+                "stock_splits": px["stock_splits"],  # split factor
 
-                # Core
-                "daily_return_log": daily_ret,  # log Rendite
-                "average_dollar_volume_20": adv20,  # ADV20
-                "volatility_becker_parkinson": sigma_bp,  # Volatilitätsmaß
-                "bid_ask_spread_corwin_schultz": spread_cs,  # Spread-Schätzung
+                # Core metrics
+                "daily_return_log": daily_ret,  # log return per session
+                "average_dollar_volume_20": adv20,  # 20-day average dollar volume
+                "volatility_becker_parkinson": sigma_bp,  # volatility proxy
+                "bid_ask_spread_corwin_schultz": spread_cs,  # spread estimate
 
-                # Technische Indikatoren
+                # Technical indicators
                 "simple_moving_average_20": sma20,
                 "simple_moving_average_60": sma60,
                 "exponential_moving_average_12": ema12,
@@ -182,9 +162,9 @@ def build_clean_data(
             index=px.index,
         )
         features.index.name = "date"
-        features = features.assign(asset=asset)  # Spalte hinzufügen
+        features = features.assign(asset=asset)  # add asset identifier column
         features = features.set_index("asset", append=True)
-        frames.append(features)  # MultiIndex: (date, asset)
+        frames.append(features)  # accumulate MultiIndex (date, asset) frames
 
     normed = []
     for f in frames:
@@ -193,16 +173,16 @@ def build_clean_data(
         else:
             normed.append(f)
 
-    # --- Zusammenführen, Finalisieren ---
-    panel = pd.concat(normed).sort_index()  # alles zusammenführen
-    panel = panel[~panel.index.duplicated(keep="last")]  # doppelte Zeilen entfernen
-    panel = _downcast_feature_dtypes(panel)  # Datentypen optimieren
+    # --- Combine and finalise ---
+    panel = pd.concat(normed).sort_index()  # concatenate all assets together
+    panel = panel[~panel.index.duplicated(keep="last")]  # drop duplicate rows conservatively
+    panel = _downcast_feature_dtypes(panel)  # optimise dtype footprint
 
-    # Optional speichern
+    # Optional persistence of the feature panel
     if out_path:
-        save_parquet(panel, out_path)  # persistieren
+        save_parquet(panel, out_path)  # persist to disk using robust writer
 
-    return panel  # Feature-Panel zurückgeben
+    return panel  # return the assembled feature panel
 
 
 def write_clean_manifest(
@@ -212,36 +192,36 @@ def write_clean_manifest(
     out_path: str | Path = "data/clean/features_v1.parquet",
     manifest_path: str | Path = "data/clean/_manifest.json",
 ) -> None:
-    """Metadaten zur CLEAN-Stufe als Manifest ablegen.
+    """Persist metadata manifest describing the CLEAN stage outputs.
 
     Parameters
     ----------
     spec : dict
-        Verwendete Konfiguration.
+        Configuration used during feature generation.
     interim_path, macro_path : Path | str
-        Eingangsdatensätze.
+        Source datasets that fed into CLEAN creation.
     out_path : Path | str
-        Speicherort des Feature-Panels.
+        Location of the generated feature panel.
     manifest_path : Path | str
-        Zielpfad für Manifest-Datei.
+        Destination path for the manifest JSON file.
     """
     payload = {
-        "stage": "clean",  # Pipeline-Stufe
-        "dataset_id": spec.get("feature_version", "v1"),  # Versionierung
-        "created_at": pd.Timestamp.utcnow().isoformat(),  # Zeitstempel
-        "git_commit": current_commit_short(),  # Referenz aufs Repo
-        "calendar": spec.get("align", {}).get("calendar", "XNYS"),  # verwendeter Kalender
+        "stage": "clean",  # pipeline stage identifier
+        "dataset_id": spec.get("feature_version", "v1"),  # feature version label
+        "created_at": pd.Timestamp.utcnow().isoformat(),  # creation timestamp
+        "git_commit": current_commit_short(),  # repository commit reference
+        "calendar": spec.get("align", {}).get("calendar", "XNYS"),  # trading calendar used
         "spec": {
             "feature_version": spec.get("feature_version", "v1"),
             "windows": spec.get("windows", {}),
             "cs": spec.get("cs", {}),
             "risk_free": spec.get("risk_free", {}),
         },
-        "inputs": [file_summary(str(interim_path)), file_summary(str(macro_path))],  # Quellen
-        "outputs": [file_summary(str(out_path))],  # erzeugte Dateien
+        "inputs": [file_summary(str(interim_path)), file_summary(str(macro_path))],  # upstream sources
+        "outputs": [file_summary(str(out_path))],  # produced artifacts
         "env": {
             "python": platform.python_version(),
             "pandas": pd.__version__,
         },
     }
-    write_manifest(payload, str(manifest_path))  # JSON auf Platte schreiben
+    write_manifest(payload, str(manifest_path))  # write manifest JSON to disk

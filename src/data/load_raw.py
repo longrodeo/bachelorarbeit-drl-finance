@@ -1,96 +1,93 @@
-# Dieses Modul lädt Rohpreisdaten über die Tiingo-API und speichert sie als Parquet.
-# Pipeline-Einordnung: Stufe RAW -> unveränderte API-Antworten je Asset persistieren.
-# Hauptfunktionen: `_is_crypto` (Tickerklassifikation), `_load_tiingo` (API-Abfrage),
-# `download_raw_prices` (Batch-Downloader).
-# Eingaben: Asset-Ticker, Zeitfenster (`start`, `end`), optionaler API-Schlüssel.
-# Ausgaben: Parquet-Dateien unterhalb des RAW-Verzeichnisses.
-# Abhängigkeiten: `pandas` für DataFrames, `requests` für HTTP, interne Pfad-/IO-Helper.
-# Edge-Cases: fehlender API-Key, leere oder fehlerhafte Antworten, Netzwerk-Timeouts.
-"""
-Download von Rohpreisdaten über die Tiingo‑API und Speichern als Parquet.
-Stufe: RAW → speichert unveränderte Antworten je Asset.
-Unterstützt Aktien und Kryptowährungen; Crypto wird per separatem Endpunkt
-abgerufen. Benötigt einen gültigen ``TIINGO_API_KEY``.
-Mögliche Fehler: fehlender API‑Key, leere Antworten oder Netzwerkprobleme.
-"""
+# -----------------------------------------------------------------------------
+# Downloads RAW price data from the Tiingo API for equities and crypto assets
+# and persists each symbol as a standalone Parquet file for subsequent pipeline
+# stages.
+# -----------------------------------------------------------------------------
 
-from __future__ import annotations  # ermöglicht Vorwärtsreferenzen in Typannotationen
+"""Download RAW market data from Tiingo and persist it under the RAW directory."""
 
-import os  # Zugriff auf Umgebungsvariablen (API-Key)
-from typing import Iterable, Optional, List  # generische Typunterstützung für Sammlungen
+from __future__ import annotations  # enable postponed evaluation of annotations
 
-import pandas as pd  # Verarbeitung tabellarischer Daten in DataFrames
-import requests  # HTTP-Anfragen an Tiingo senden
+import os
+from typing import Iterable, Optional, List
 
-from src.utils.paths import raw_asset_path, _normalize_asset  # Pfad- und Normalisierungs-Helper
-from src.utils.parquet_io import save_parquet  # robustes Parquet-Schreiben
+import pandas as pd
+import requests
 
-def _is_crypto(asset: str) -> bool:  # prüft auf Krypto-Kürzel anhand USD-Suffix
-    """Erkennen, ob ein Ticker eine Krypto‑Notation (z. B. ``BTCUSD``) ist."""
-    return asset.upper().endswith("USD")  # Krypto-Paare enden typischerweise auf USD
+from src.utils.paths import raw_asset_path, _normalize_asset
+from src.utils.parquet_io import save_parquet
 
-def _load_tiingo(asset: str, start: str, end: str, token: Optional[str] = None) -> pd.DataFrame:  # API-Aufruf pro Asset
-    """Rohdaten direkt von Tiingo laden.
+
+def _is_crypto(asset: str) -> bool:
+    """Return ``True`` if the ticker looks like a crypto pair (USD suffix)."""
+    return asset.upper().endswith("USD")
+
+
+def _load_tiingo(asset: str, start: str, end: str, token: Optional[str] = None) -> pd.DataFrame:
+    """Load raw data for a single asset directly from Tiingo.
 
     Parameters
     ----------
     asset : str
-        Symbol/Ticker des gewünschten Assets.
+        Symbol or ticker to request.
     start, end : str
-        Zeitfenster im ISO-Format.
+        ISO-formatted start and end dates.
     token : str | None
-        API-Schlüssel; falls ``None``, wird ``TIINGO_API_KEY`` verwendet.
+        API token; defaults to ``TIINGO_API_KEY`` from the environment.
 
     Returns
     -------
     pd.DataFrame
-        Unveränderte Antwort der Tiingo-API.
+        Unmodified response payload from the Tiingo API.
     """
-    token = token or os.getenv("TIINGO_API_KEY")  # API-Key aus Argument oder Umgebung beziehen
-    if not token:  # ohne gültigen Schlüssel lässt sich die API nicht nutzen
-        raise RuntimeError("TIINGO_API_KEY is not set.")  # klarer Fehler für fehlende Credentials
+    token = token or os.getenv("TIINGO_API_KEY")
+    if not token:
+        raise RuntimeError("TIINGO_API_KEY is not set.")
 
-    if _is_crypto(asset):  # Branch: Krypto-Ticker benötigen eigenen Endpunkt
-        url = "https://api.tiingo.com/tiingo/crypto/prices"  # Basis-URL für Krypto-API
-        params = {"tickers": asset.lower(), "startDate": start, "endDate": end, "resampleFreq": "1day", "token": token}  # Query-Parameter zusammenstellen
-        r = requests.get(url, params=params, timeout=30); r.raise_for_status()  # GET-Anfrage mit Timeout, Fehler bei HTTP!=200
-        payload = r.json()  # Antwort als Python-Struktur dekodieren
-        if not payload:  # leere Liste bedeutet keine Daten verfügbar
-            raise ValueError(f"No crypto data returned for {asset}.")  # explizite Fehlermeldung
-        rows = payload[0].get("priceData", [])  # Preiszeitreihe aus erster Listeneinheit extrahieren
-        return pd.DataFrame(rows)  # Umwandlung in DataFrame zur Weiterverarbeitung
-    else:  # Branch: klassische Aktien-/ETF-Ticker
-        url = f"https://api.tiingo.com/tiingo/daily/{asset}/prices"  # API-Endpunkt je Asset
-        params = {"startDate": start, "endDate": end, "resampleFreq": "daily", "token": token}  # Parameter für Tagesdaten
-        r = requests.get(url, params=params, timeout=30); r.raise_for_status()  # Abruf End-of-Day Daten, Fehler bei HTTP!=200
-        return pd.DataFrame(r.json())  # JSON-Liste direkt in DataFrame konvertieren
+    if _is_crypto(asset):
+        url = "https://api.tiingo.com/tiingo/crypto/prices"
+        params = {"tickers": asset.lower(), "startDate": start, "endDate": end, "resampleFreq": "1day", "token": token}
+        r = requests.get(url, params=params, timeout=30)
+        r.raise_for_status()
+        payload = r.json()
+        if not payload:
+            raise ValueError(f"No crypto data returned for {asset}.")
+        rows = payload[0].get("priceData", [])
+        return pd.DataFrame(rows)
+    else:
+        url = f"https://api.tiingo.com/tiingo/daily/{asset}/prices"
+        params = {"startDate": start, "endDate": end, "resampleFreq": "daily", "token": token}
+        r = requests.get(url, params=params, timeout=30)
+        r.raise_for_status()
+        return pd.DataFrame(r.json())
 
-def download_raw_prices(assets: Iterable[str], start: str, end: str, token: Optional[str] = None) -> List[str]:  # Batch-Download
-    """Mehrere Assets herunterladen und als Parquet speichern.
+
+def download_raw_prices(assets: Iterable[str], start: str, end: str, token: Optional[str] = None) -> List[str]:
+    """Download multiple assets and write each one to a Parquet file.
 
     Parameters
     ----------
     assets : Iterable[str]
-        Liste von Tickern.
+        Tickers to retrieve from Tiingo.
     start, end : str
-        Zeitfenster der Abfrage.
+        Date range for the request.
     token : str | None
-        Optionaler API-Key.
+        Optional API token overriding the environment variable.
 
     Returns
     -------
     List[str]
-        Pfade zu geschriebenen Parquet-Dateien.
+        File paths of successfully written Parquet outputs.
     """
-    written: List[str] = []  # sammelt Pfade der erfolgreich geschriebenen Dateien
-    for asset in assets:  # iteriere über alle angeforderten Ticker
-        norm_asset = _normalize_asset(asset)  # Ticker auf API-Konvention normieren
+    written: List[str] = []  # collect successfully written Parquet paths
+    for asset in assets:
+        norm_asset = _normalize_asset(asset)
         try:
-            df = _load_tiingo(norm_asset, start, end, token=token)  # Einzel-Asset von Tiingo laden
-        except Exception as e:  # jegliche Fehler (Netzwerk, API) abfangen
-            print(f"[WARN] {asset}: konnte nicht geladen werden ({e}), skip.")  # warnen, aber Pipeline fortsetzen
-            continue  # nächstes Asset verarbeiten
-        path = raw_asset_path(asset)  # Zielpfad im RAW-Verzeichnis ermitteln
-        save_parquet(df, path)  # DataFrame robust als Parquet schreiben
-        written.append(str(path))  # Pfad als String in Ergebnisliste aufnehmen
-    return written  # Liste aller geschriebenen Dateien zurückgeben
+            df = _load_tiingo(norm_asset, start, end, token=token)
+        except Exception as e:  # noqa: BLE001 - keep broad for resilience in data scripts
+            print(f"[WARN] {asset}: download failed ({e}), skipping.")
+            continue
+        path = raw_asset_path(asset)
+        save_parquet(df, path)
+        written.append(str(path))
+    return written
