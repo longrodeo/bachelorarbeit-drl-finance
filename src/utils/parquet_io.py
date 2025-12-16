@@ -1,75 +1,67 @@
 # ---------------------------------------------------------------------------
-# Datei: src/utils/parquet_io.py
-# Zweck: Robuste Ein-/Ausgabefunktionen für Parquet-Dateien mit Fallback auf
-#   unterschiedliche Engines.
-# Hauptfunktionen: ``save_parquet`` und ``load_parquet``.
-# Abhängigkeiten: ``pandas`` sowie ``pathlib`` für Pfadmanipulation.
-# Edge Cases: fehlende fastparquet/pyarrow-Installation oder nicht existente
-#   Verzeichnisse.
+# Parquet IO utilities that provide robust save/load helpers with engine fallbacks.
+# Ensures directories exist before writing and prefers fastparquet when available.
+# Serves as a centralized access point for consistent Parquet handling across code.
 # ---------------------------------------------------------------------------
-from __future__ import annotations  # zukünftige Typ-Hints ermöglichen
-from pathlib import Path  # objektorientierte Pfadbehandlung
-from typing import Union  # Union für Pfadtypen (str/Path)
-import pandas as pd  # DataFrame-IO
+from __future__ import annotations  # enable postponed type annotations
+from pathlib import Path  # object-oriented filesystem path handling
+from typing import Union  # allow str or Path inputs in function signatures
+import pandas as pd  # pandas DataFrame serialization utilities
 
-__all__ = ["save_parquet", "load_parquet"]  # Exportierte Funktionen
+__all__ = ["save_parquet", "load_parquet"]  # exported utility functions
 
 def _ensure_parent_dir(path: Path) -> None:
-    """Create parent directories for the given path if they do not exist."""
-    parent = path.parent  # Elternverzeichnis bestimmen
-    if parent and not parent.exists():  # nur bei fehlendem Verzeichnis aktiv
-        parent.mkdir(parents=True, exist_ok=True)  # rekursiv anlegen
+    """Ensure the parent directory of ``path`` exists before writing files.
+
+    Args:
+        path: Destination path whose parent directory must be created.
+    """
+
+    parent = path.parent
+    if parent and not parent.exists():
+        parent.mkdir(parents=True, exist_ok=True)
 
 def save_parquet(df: pd.DataFrame, path: Union[str, Path]) -> None:
+    """Persist a pandas ``DataFrame`` to Parquet with safe engine fallbacks.
+
+    Args:
+        df: Table that should be stored on disk.
+        path: Target file path where the Parquet artifact will be written.
     """
-    Speichert ein pandas DataFrame als Parquet-Datei mit stabiler Engine-Auswahl.
-    - Erst fastparquet probieren, sonst pyarrow.
-    - Index wird standardmäßig gespeichert.
-    
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Zu speichernde Tabelle.
-    path : str | Path
-        Zieldatei.
-    """
-    p = Path(path)  # Pfadobjekt erzeugen
-    _ensure_parent_dir(p)  # sicherstellen, dass Verzeichnis existiert
-    try:  # bevorzugte Engine fastparquet
-        df.to_parquet(p, engine="fastparquet")  # schreiben
-    except Exception as e_fast:  # Fallback auf pyarrow
+
+    p = Path(path)
+    _ensure_parent_dir(p)
+    try:
+        df.to_parquet(p, engine="fastparquet")
+    except Exception as e_fast:
         try:
-            df.to_parquet(p, engine="pyarrow")  # alternative Engine
-        except Exception as e_arrow:  # beide fehlgeschlagen → Fehler melden
+            df.to_parquet(p, engine="pyarrow")
+        except Exception as e_arrow:
             raise RuntimeError(
-                f"Parquet speichern fehlgeschlagen. "
+                f"Failed to write Parquet file. "
                 f"fastparquet: {e_fast}, pyarrow: {e_arrow}"
             )
 
 def load_parquet(path: Union[str, Path]) -> pd.DataFrame:
-    """
-    Lädt eine Parquet-Datei stabil (fastparquet bevorzugt, sonst pyarrow).
+    """Load a Parquet file using fastparquet with pyarrow as fallback.
 
-    Parameters
-    ----------
-    path : str | Path
-        Dateipfad der zu ladenden Parquet-Datei.
+    Args:
+        path: File path that should be read into a pandas ``DataFrame``.
 
-    Returns
-    -------
-    pd.DataFrame
-        Eingelesene Tabelle.
+    Returns:
+        DataFrame reconstructed from the stored Parquet file.
     """
-    p = Path(path)  # Pfadobjekt erzeugen
-    if not p.is_file():  # Existenzcheck
-        raise FileNotFoundError(f"Parquet-Datei nicht gefunden: {p}")
-    try:  # bevorzugte Engine fastparquet
+
+    p = Path(path)
+    if not p.is_file():
+        raise FileNotFoundError(f"Parquet file not found: {p}")
+    try:
         return pd.read_parquet(p, engine="fastparquet")
-    except Exception as e_fast:  # Fallback auf pyarrow
+    except Exception as e_fast:
         try:
             return pd.read_parquet(p, engine="pyarrow")
-        except Exception as e_arrow:  # beide fehlgeschlagen
+        except Exception as e_arrow:
             raise RuntimeError(
-                f"Parquet laden fehlgeschlagen. "
+                f"Failed to read Parquet file. "
                 f"fastparquet: {e_fast}, pyarrow: {e_arrow}"
             )
