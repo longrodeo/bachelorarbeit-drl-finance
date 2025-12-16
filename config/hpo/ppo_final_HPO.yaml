@@ -5,7 +5,7 @@
   learning_rate: 0.00040
   clip_range: 0.25
   clip_range_vf: 0.20
-  target_kl: null
+  target_kl: 0.016
   gamma: 0.99
   n_steps: 4096
   batch_size: 256

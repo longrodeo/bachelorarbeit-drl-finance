@@ -14,7 +14,7 @@ TAG_CANDS = {
     "ev_med":    ["train/explained_variance", "rollout/explained_variance"],
 }
 
-RUN_ROOT = Path(r"C:\Dev\Bachelorarbeit\data\accounting\runs\hpo_stageF\ppo_log_state0_cpcv_20251025_082543")
+RUN_ROOT = Path(r"C:\Dev\Bachelorarbeit\data\accounting\runs\hpo_stageF\ppo_log_state0_cpcv_20251115_141658")
 
 def read_last_scalars(tb_dir: Path) -> dict:
     ea = EventAccumulator(str(tb_dir), size_guidance={"scalars": 0})
