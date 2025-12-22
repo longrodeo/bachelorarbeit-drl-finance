@@ -3,7 +3,7 @@ kind: walkforward
 splits: config/splits_wf_2021_2024.yaml
 start: 2015-01-01   # damit erstes Testjahr 2021 möglich ist (4y Train)
 end:   2024-12-31
-first_train_years: 6
+first_train_years: 3
 test_years: 1
 step_years: 1
-expanding: true     # <<< neu
+expanding: true
