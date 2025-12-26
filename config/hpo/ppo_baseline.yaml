@@ -1,0 +1,28 @@
+# Baseline: Stable-Baselines3 Default-Hyperparameter für PPO
+# Quelle: https://stable-baselines3.readthedocs.io/en/master/modules/ppo.html
+# Diese Werte dienen als wissenschaftliche Baseline ohne HPO
+
+- _name: SB3_Defaults
+  # Learning
+  learning_rate: 0.0003
+  n_steps: 2048
+  batch_size: 64
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+
+  # Policy update
+  clip_range: 0.2
+  clip_range_vf: null        # kein Value Function Clipping per default
+
+  # Regularization
+  ent_coef: 0.0              # keine Entropy Regularization per default
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+
+  # Exploration
+  use_sde: false             # kein State Dependent Exploration per default
+  sde_sample_freq: -1
+
+  # Note: target_kl wird bewusst weggelassen, damit der Code-Default (None) greift
+  # Dies ermöglicht Training ohne Early Stopping für faire CPCV/WF Evaluation

@@ -8,7 +8,7 @@ common:
     total_timesteps: 200000
     run_root: data/accounting/runs
 
-# Was variiert (automatische Kartesische Produkte)
+# Was variiert (automatische kartesische Produkte)
 grid:
   strategy:               # mehrere Strategien möglich
     - kind: cpcv
@@ -16,7 +16,7 @@ grid:
     - kind: walkforward
       splits: config/splits_wf.yaml
   reward:
-    - kind: log
+    - kind: logchchrom
     - kind: icvar
       icvar:
         alpha: 0.05
