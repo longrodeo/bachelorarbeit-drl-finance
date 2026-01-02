@@ -24,8 +24,8 @@ class RewardSpec:
     icvar_mode: Literal["ex_ante", "ex_post"] = "ex_ante"
     alpha: float = 0.05               # Tail-Level für (C)VaR
     min_period: int = 20                 # Expanding-Fenster für Training höher setzten
-    lambda_: float = 1.0              # Gewicht ICVaR
-    gamma: float = 1.0                # Gewicht ΔMDD (nur bei kind="icvar_dd")
+    lambda_: float = 5.0              # Gewicht ICVaR
+    gamma: float = 0.0                # Gewicht ΔMDD (nur bei kind="icvar_dd")
     estimator: Literal["rolling"] = "rolling"
     ewm_alpha: float | None = 0.10    # optional: Glättung der CVaR-Serie (0<alpha<=1), None = aus
 
