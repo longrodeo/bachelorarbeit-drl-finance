@@ -38,7 +38,8 @@ def apply_reward_spec(*, r_log_t, icvar_t=0.0, delta_mdd_t=0.0, spec: RewardSpec
         return r_log_t
     if spec.kind == "icvar":
         lamda = spec.lambda_
-        return r_log_t - spec.lambda_ * icvar_t, print(f"Lamda: {lamda}")
+        print(f"Lamda: {lamda}")
+        return r_log_t - spec.lambda_ * icvar_t
     if spec.kind == "icvar_dd":
         return r_log_t - spec.lambda_ * icvar_t - spec.gamma * delta_mdd_t, print(spec.gamma)
     raise ValueError(f"Unbekannte Reward-Variante: {spec.kind}")
