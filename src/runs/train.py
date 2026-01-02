@@ -144,6 +144,12 @@ def main():
         logger.debug("[_read_windows] returned type: %s", type(windows))
         logger.info("[RUN] %d splits loaded from %s", len(windows), args.splits)
 
+        # Beispiel: nur diese Folds in Stage A verwenden
+        if args.hpo_splits:
+            keep = [int(x) for x in args.hpo_splits.split(",")]
+            windows = [windows[i] for i in keep]
+            logger.info("HPO_splits aktiv: %s -> %d verwendete Folds", args.hpo_splits, len(windows))
+
         panel = load_data_for_windows(
             windows,
             strategy=args.strategy,
@@ -152,11 +158,7 @@ def main():
         spec = sb.load_spec(str(args.state_spec))
         logger.info("Panel und state_spec geladen")
 
-        # Beispiel: nur diese Folds in Stage A verwenden
-        if args.hpo_splits:
-            keep = [int(x) for x in args.hpo_splits.split(",")]
-            windows = [windows[i] for i in keep]
-            logger.info("HPO_splits aktiv: %s -> %d verwendete Folds", args.hpo_splits, len(windows))
+
 
         if args.strategy.lower() == "walkforward":
             logger.info("[DATA] walk-forward -> using features_source=%s", args.features_source)

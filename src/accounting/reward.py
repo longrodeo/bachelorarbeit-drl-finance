@@ -28,3 +28,16 @@ class RewardSpec:
     gamma: float = 1.0                # Gewicht ΔMDD (nur bei kind="icvar_dd")
     estimator: Literal["rolling"] = "rolling"
     ewm_alpha: float | None = 0.10    # optional: Glättung der CVaR-Serie (0<alpha<=1), None = aus
+
+def apply_reward_spec(*, r_log_t, icvar_t=0.0, delta_mdd_t=0.0, spec: RewardSpec):
+    """
+    Single source of truth.
+    Funktioniert mit float, numpy arrays und pandas Series (broadcasting).
+    """
+    if spec.kind == "log":
+        return r_log_t
+    if spec.kind == "icvar":
+        return r_log_t - spec.lambda_ * icvar_t
+    if spec.kind == "icvar_dd":
+        return r_log_t - spec.lambda_ * icvar_t - spec.gamma * delta_mdd_t
+    raise ValueError(f"Unbekannte Reward-Variante: {spec.kind}")

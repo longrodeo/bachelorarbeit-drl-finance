@@ -4,8 +4,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.accounting.reward import RewardSpec
+from src.accounting.reward import RewardSpec, apply_reward_spec
 from src.utils.parquet_io import load_parquet, save_parquet
+
+
 
 EPS = 1e-12
 
@@ -156,14 +158,12 @@ def compute_rewards_from_snapshots(
         base["delta_mdd_t"] = 0.0
 
     # 5) Reward je Spec
-    if spec.kind == "log":
-        base["reward_t"] = base["r_log_t"]
-    elif spec.kind == "icvar":
-        base["reward_t"] = base["r_log_t"] - spec.lambda_ * base["icvar_t"]
-    elif spec.kind == "icvar_dd":
-        base["reward_t"] = base["r_log_t"] - spec.lambda_ * base["icvar_t"] - spec.gamma * base["delta_mdd_t"]
-    else:
-        raise ValueError(f"Unbekannte Reward-Variante: {spec.kind}")
+    base["reward_t"] = apply_reward_spec(
+        r_log_t=base["r_log_t"],
+        icvar_t=base["icvar_t"],
+        delta_mdd_t=base["delta_mdd_t"],
+        spec=spec,
+    )
 
     # 6) Clean-up: erste Round hat nav_t = NaN -> r_log_t/Reward nicht definiert => droppen
     out = base.dropna(subset=["nav_t-1"]).copy()
@@ -255,14 +255,13 @@ class OnlineEvaluator:
             base["delta_mdd_t"] = 0.0
 
         # Reward
-        if self.kind == "log":
-            base["reward_t"] = base["r_log_t"]
-        elif self.kind == "icvar":
-            base["reward_t"] = base["r_log_t"] - self.lambda_ * base["icvar_t"]
-        elif self.kind == "icvar_dd":
-            base["reward_t"] = base["r_log_t"] - self.lambda_ * base["icvar_t"] - self.gamma * base["delta_mdd_t"]
-        else:
-            raise ValueError(f"Unbekannte Reward-Variante: {self.kind}")
+        spec = RewardSpec(kind=self.kind, lambda_=self.lambda_, gamma=self.gamma)
+        base["reward_t"] = apply_reward_spec(
+            r_log_t=base["r_log_t"],
+            icvar_t=base["icvar_t"],
+            delta_mdd_t=base["delta_mdd_t"],
+            spec=spec,
+        )
 
         out = base.dropna(subset=["nav_t-1"]).reset_index(drop=True)
         return out

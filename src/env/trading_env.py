@@ -18,6 +18,9 @@ import pandas as pd
 import gymnasium as gym
 from gymnasium import spaces
 
+from src.accounting.reward import RewardSpec, apply_reward_spec
+
+
 
 class TradingEnv(gym.Env):
     metadata = {"render.modes": []}
@@ -44,13 +47,12 @@ class TradingEnv(gym.Env):
         # --- Reward ---
         reward_kind: str = "log",       # "log" | "icvar" | "icvar_dd"
         reward_scaler: Optional[Any] = None,   # dein reward_norm (online): reset(), update(x)->y
+        reward_spec: RewardSpec | None = None,
         evaluator: Optional[Any] = None,       # Objekt/Modul mit mts_var_cvar_icvar / _mdd_series
         icvar_alpha: float = 0.05,
         icvar_min_period: int = 1,
         icvar_ewm_alpha: Optional[float] = None,
         icvar_mode: str = "ex_post",    # "ex_post" (inkl. aktueller r) oder "ex_ante"
-        lambda_icvar: float = 1.0,      # Gewicht für ICVaR-Penalty
-        gamma_dd: float = 0.0,          # Zusatzgewicht für ΔMDD in "icvar_dd"
 
         # --- Recorder (optional) ---
         recorder: Optional[Any] = None,
@@ -84,13 +86,12 @@ class TradingEnv(gym.Env):
         # Reward-Optionen
         self.reward_kind = str(reward_kind)
         self.reward_scaler = reward_scaler
+        self.reward_spec = reward_spec
         self.evaluator = evaluator
         self.icvar_alpha = float(icvar_alpha)
         self.icvar_min_period = int(icvar_min_period)
         self.icvar_ewm_alpha = None if icvar_ewm_alpha is None else float(icvar_ewm_alpha)
         self.icvar_mode = str(icvar_mode)
-        self.lambda_icvar = float(lambda_icvar)
-        self.gamma_dd = float(gamma_dd)
 
         self.validate_actions = bool(validate_actions)
         self.eps = float(eps)
@@ -308,8 +309,9 @@ class TradingEnv(gym.Env):
         # Serie für ICVaR: Historie (+ optional aktueller r_log)
         r_series = pd.Series(self.r_log_hist + ([r_log] if include_current else []))
 
+
         if self.reward_kind == "log":
-            r_raw = r_log
+            r_raw = apply_reward_spec(r_log_t=r_log, spec=RewardSpec(kind="log"))
 
         elif self.reward_kind in ("icvar", "icvar_dd"):
             if self.evaluator is None or not hasattr(self.evaluator, "mts_var_cvar_icvar"):
@@ -324,10 +326,11 @@ class TradingEnv(gym.Env):
                 as_series=True,
             )
             icvar_t = float(icvar_s.iloc[-1]) if len(icvar_s) else 0.0
-            penalty_icvar = self.lambda_icvar * icvar_t
+
 
             if self.reward_kind == "icvar":
-                r_raw = r_log - penalty_icvar
+                r_raw = apply_reward_spec(r_log_t=r_log, icvar_t=icvar_t, spec=RewardSpec(kind="icvar"))
+
             else:
                 # ΔMDD über NAV-Pfad (ohne Zukunftsleak)
                 if self.evaluator is None or not hasattr(self.evaluator, "_mdd_series"):
@@ -337,7 +340,8 @@ class TradingEnv(gym.Env):
                 mdd_t = float(self.evaluator._mdd_series(nav_t_path.ffill()).iloc[-1]) if len(nav_t_path) else 0.0
                 mdd_t1 = float(self.evaluator._mdd_series(nav_t1_path.ffill()).iloc[-1]) if len(nav_t1_path) else 0.0
                 delta_mdd = max(0.0, mdd_t1 - mdd_t)
-                r_raw = r_log - penalty_icvar - self.gamma_dd * delta_mdd
+                r_raw = apply_reward_spec(r_log_t=r_log, icvar_t=icvar_t, delta_mdd_t=delta_mdd, spec=RewardSpec(kind="icvar_dd"))
+
         else:
             raise ValueError(f"Unbekannte reward_kind: {self.reward_kind}")
 

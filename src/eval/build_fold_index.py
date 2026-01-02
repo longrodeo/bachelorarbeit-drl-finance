@@ -1,5 +1,6 @@
 from pathlib import Path
 import pandas as pd
+import json
 
 from src.utils.parquet_io import load_parquet, save_parquet
 # ------------------------------------------------------------
@@ -29,10 +30,28 @@ def _read_if_exists(p: Path) -> pd.DataFrame | None:
     return None
 
 def _collect_fold_segment(root: Path, fold_id: int) -> dict[str, list[pd.DataFrame]]:
-    """Liest aus fold_{id}/test/seg_01, seg_02 die drei Tabellen (falls vorhanden)."""
+    # --- Segmente dynamisch bestimmen (z.B. test_2015, test_2016, ...) ---
+    fold_root = root / f"fold_{fold_id:02d}"
+    meta_path = fold_root / "fold_meta.json"
+
+    seg_names = []
+    if meta_path.is_file():
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        for start, _end in meta.get("test", []):
+            year = str(start)[:4]
+            seg_names.append(f"test_{year}")
+    else:
+        # Fallback: alle Unterordner unter test/ nehmen
+        print("Fallback activated.")
+        test_dir = fold_root / "test"
+        seg_names = sorted(
+            [p.name for p in test_dir.iterdir() if p.is_dir()],
+            key=lambda s: int("".join(ch for ch in s if ch.isdigit()) or 0),
+        )
+
     out = {"portfolio": [], "events": [], "rewards": []}
-    fold = root / f"fold_{fold_id:02d}" / "test"
-    for seg in ("seg_01", "seg_02"):
+    fold = fold_root / "test"
+    for seg in seg_names:
         base = fold / seg
         # portfolio_snapshots
         df_port = _read_if_exists(base / "portfolio_snapshots.parquet")
@@ -98,15 +117,15 @@ def combine_paths(run_dir: str | Path, manifest_csv: str | Path, n_paths: int = 
 
         df_port = _concat_time_clean(port_dfs)
         if not df_port.empty:
-            df_port.to_parquet(path_dir / "portfolio_snapshots.parquet")
+            save_parquet(df_port, path_dir/"portfolio_snapshots.parquet")
 
         df_ev = _concat_time_clean(ev_dfs)
         if not df_ev.empty:
-            df_ev.to_parquet(path_dir / "trade_events.parquet")
+            save_parquet(df_ev, path_dir / "trade_events.parquet")
 
         df_rw = _concat_time_clean(rw_dfs)
         if not df_rw.empty:
-            df_rw.to_parquet(path_dir / "rewards.parquet")
+            save_parquet(df_rw, path_dir / "rewards.parquet")
 
 if __name__ == "__main__":
     import argparse
