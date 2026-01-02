@@ -24,7 +24,7 @@ class RewardSpec:
     icvar_mode: Literal["ex_ante", "ex_post"] = "ex_ante"
     alpha: float = 0.05               # Tail-Level für (C)VaR
     min_period: int = 20                 # Expanding-Fenster für Training höher setzten
-    lambda_: float = 5.0              # Gewicht ICVaR
+    lambda_: float = 1.0              # Gewicht ICVaR
     gamma: float = 0.0                # Gewicht ΔMDD (nur bei kind="icvar_dd")
     estimator: Literal["rolling"] = "rolling"
     ewm_alpha: float | None = 0.10    # optional: Glättung der CVaR-Serie (0<alpha<=1), None = aus
@@ -37,7 +37,8 @@ def apply_reward_spec(*, r_log_t, icvar_t=0.0, delta_mdd_t=0.0, spec: RewardSpec
     if spec.kind == "log":
         return r_log_t
     if spec.kind == "icvar":
-        return r_log_t - spec.lambda_ * icvar_t
+        lamda = spec.lambda_
+        return r_log_t - spec.lambda_ * icvar_t, print(f"Lamda: {lamda}")
     if spec.kind == "icvar_dd":
-        return r_log_t - spec.lambda_ * icvar_t - spec.gamma * delta_mdd_t
+        return r_log_t - spec.lambda_ * icvar_t - spec.gamma * delta_mdd_t, print(spec.gamma)
     raise ValueError(f"Unbekannte Reward-Variante: {spec.kind}")
