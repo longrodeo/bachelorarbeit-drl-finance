@@ -47,7 +47,6 @@ class TradingEnv(gym.Env):
         # --- Reward ---
         reward_kind: str = "log",       # "log" | "icvar" | "icvar_dd"
         reward_scaler: Optional[Any] = None,   # dein reward_norm (online): reset(), update(x)->y
-        reward_spec: RewardSpec | None = None,
         evaluator: Optional[Any] = None,       # Objekt/Modul mit mts_var_cvar_icvar / _mdd_series
         icvar_alpha: float = 0.05,
         icvar_min_period: int = 1,
@@ -86,7 +85,9 @@ class TradingEnv(gym.Env):
         # Reward-Optionen
         self.reward_kind = str(reward_kind)
         self.reward_scaler = reward_scaler
-        self.reward_spec = reward_spec
+        self.reward_spec_log = RewardSpec(kind="log")
+        self.reward_spec_icvar = RewardSpec(kind="icvar")
+        self.reward_spec_icvar_dd = RewardSpec(kind="icvar_dd")
         self.evaluator = evaluator
         self.icvar_alpha = float(icvar_alpha)
         self.icvar_min_period = int(icvar_min_period)
@@ -311,7 +312,7 @@ class TradingEnv(gym.Env):
 
 
         if self.reward_kind == "log":
-            r_raw = apply_reward_spec(r_log_t=r_log, spec=RewardSpec(kind="log"))
+            r_raw = apply_reward_spec(r_log_t=r_log, spec=self.reward_spec_log)
 
         elif self.reward_kind in ("icvar", "icvar_dd"):
             if self.evaluator is None or not hasattr(self.evaluator, "mts_var_cvar_icvar"):
@@ -329,7 +330,7 @@ class TradingEnv(gym.Env):
 
 
             if self.reward_kind == "icvar":
-                r_raw = apply_reward_spec(r_log_t=r_log, icvar_t=icvar_t, spec=RewardSpec(kind="icvar"))
+                r_raw = apply_reward_spec(r_log_t=r_log, icvar_t=icvar_t, spec=self.reward_spec_icvar)
 
             else:
                 # ΔMDD über NAV-Pfad (ohne Zukunftsleak)
@@ -340,7 +341,7 @@ class TradingEnv(gym.Env):
                 mdd_t = float(self.evaluator._mdd_series(nav_t_path.ffill()).iloc[-1]) if len(nav_t_path) else 0.0
                 mdd_t1 = float(self.evaluator._mdd_series(nav_t1_path.ffill()).iloc[-1]) if len(nav_t1_path) else 0.0
                 delta_mdd = max(0.0, mdd_t1 - mdd_t)
-                r_raw = apply_reward_spec(r_log_t=r_log, icvar_t=icvar_t, delta_mdd_t=delta_mdd, spec=RewardSpec(kind="icvar_dd"))
+                r_raw = apply_reward_spec(r_log_t=r_log, icvar_t=icvar_t, delta_mdd_t=delta_mdd, spec=self.reward_spec_icvar_dd)
 
         else:
             raise ValueError(f"Unbekannte reward_kind: {self.reward_kind}")

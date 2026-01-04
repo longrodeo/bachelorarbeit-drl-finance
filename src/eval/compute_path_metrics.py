@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import numpy as np
 import pandas as pd
 
@@ -100,6 +101,7 @@ def _load_riskfree_series(riskfree_parquet: str | None, riskfree_col: str = "rf_
 def compute_path_metrics(
     run_dir: str | Path,
     *,
+    mode: str = "paths",
     periods_per_year: int = 252,
     alpha_cvar: float = 0.95,
     riskfree_parquet: str | None = None,
@@ -113,84 +115,141 @@ def compute_path_metrics(
     rep = run_dir / "_report"
     rep.mkdir(parents=True, exist_ok=True)
 
-    rows_path = []
-    rows_year = []
+    mode = (mode or "paths").strip().lower()
     rf = _load_riskfree_series(riskfree_parquet, riskfree_col=riskfree_col)
 
-    for pid in range(1, 6):
-        pdir = run_dir / f"Path_{pid:02d}"
-
-        # returns aus rewards.parquet (r_log_t -> simple returns)
-        ret_total = _load_returns_from_rewards(pdir, log_col="r_log_t")
-
-        # excess returns (optional)
-        if rf is not None:
-            rf_a = rf.reindex(ret_total.index).fillna(0.0)
-            ret_ex = (1.0 + ret_total).div(1.0 + rf_a) - 1.0
+    def _excess(ret_total: pd.Series) -> pd.Series:
+        if rf is None:
+            out = ret_total.copy()
         else:
-            ret_ex = ret_total.copy()
-        ret_ex.name = "ret_ex"
+            rf_a = rf.reindex(ret_total.index).fillna(0.0)
+            out = (1.0 + ret_total).div(1.0 + rf_a) - 1.0
+        out.name = "ret_ex"
+        return out
 
-        # pro Jahr (excess)
-        for y, r_y in ret_ex.groupby(ret_ex.index.year):
-            k = scorecard_eval(r_y, periods_per_year=periods_per_year, alpha_cvar=alpha_cvar)
-            row_y = {
+    if mode in {"paths", "path", "cpcv"}:
+        rows_path: list[dict] = []
+        rows_year: list[dict] = []
+
+        path_dirs = sorted([d for d in run_dir.glob("Path_*") if d.is_dir()])
+        if not path_dirs:
+            raise FileNotFoundError(f"Keine Path_* Ordner in {run_dir}")
+
+        for pdir in path_dirs:
+            m = re.search(r"Path_(\d+)", pdir.name)
+            pid = int(m.group(1)) if m else int(len(rows_path) + 1)
+
+            ret_total = _load_returns_from_rewards(pdir, log_col="r_log_t")
+            ret_ex = _excess(ret_total)
+
+            # pro Jahr (excess)
+            for y, r_y in ret_ex.groupby(ret_ex.index.year):
+                k = scorecard_eval(r_y, periods_per_year=periods_per_year, alpha_cvar=alpha_cvar)
+                row_y = {
+                    "run": run_dir.name,
+                    "path_id": pid,
+                    "year": int(y),
+                    "ex_cum_return": k["cum_return"],
+                    "ex_sharpe": k["sharpe"],
+                    "ex_sortino": k["sortino"],
+                    "ex_cvar_95": k["cvar"],
+                    "ex_maxdd": k["maxdd"],
+                    "ex_calmar": k["calmar"],
+                    "psr_ex": float(psr(r_y, sr_threshold=0.0)) if include_psr else float("nan"),
+                }
+                rows_year.append(row_y)
+
+            # aggregiert pro Path (total/excess)
+            k_total = scorecard_eval(ret_total, periods_per_year=periods_per_year, alpha_cvar=alpha_cvar)
+            k_ex = scorecard_eval(ret_ex, periods_per_year=periods_per_year, alpha_cvar=alpha_cvar)
+
+            avg_cost, avg_to = _load_cost_turnover(pdir)
+            row = {
                 "run": run_dir.name,
                 "path_id": pid,
-                "year": int(y),
-                "ex_cum_return": k["cum_return"],
-                "ex_sharpe": k["sharpe"],
-                "ex_sortino": k["sortino"],
-                "ex_cvar_95": k["cvar"],
-                "ex_maxdd": k["maxdd"],
-                "ex_calmar": k["calmar"],
+
+                "total_cum_return": k_total["cum_return"],
+                "total_maxdd": k_total["maxdd"],
+
+                "ex_cum_return": k_ex["cum_return"],
+                "ex_sharpe": k_ex["sharpe"],
+                "ex_sortino": k_ex["sortino"],
+                "ex_cvar_95": k_ex["cvar"],
+                "ex_calmar": k_ex["calmar"],
+
+                "avg_cost_rate": avg_cost,
+                "avg_turnover": avg_to,
+
+                "psr_ex": float(psr(ret_ex, sr_threshold=0.0)) if include_psr else float("nan"),
+                "dsr_ex": float(dsr(ret_ex, n_trials=n_trials_dsr, sr_var_trials=sr_var_trials)) if include_dsr else float("nan"),
             }
-            if include_psr:
-                row_y["psr_ex"] = float(psr(r_y, sr_threshold=0.0))
-            else:
-                row_y["psr_ex"] = float("nan")
-            rows_year.append(row_y)
+            rows_path.append(row)
 
-        # aggregiert pro Path (total/excess)
-        k_total = scorecard_eval(ret_total, periods_per_year=periods_per_year, alpha_cvar=alpha_cvar)
-        k_ex = scorecard_eval(ret_ex, periods_per_year=periods_per_year, alpha_cvar=alpha_cvar)
+        if rows_year:
+            pd.DataFrame(rows_year).sort_values(["path_id", "year"]).to_csv(rep / "metrics_per_path_year.csv", index=False)
+        if rows_path:
+            pd.DataFrame(rows_path).sort_values("path_id").to_csv(rep / "metrics_per_path.csv", index=False)
 
-        avg_cost, avg_to = _load_cost_turnover(pdir)
+    elif mode in {"wf_year", "wf", "walkforward_year", "walkforward"}:
+        rows: list[dict] = []
 
-        row = {
-            "run": run_dir.name,
-            "path_id": pid,
+        fold_dirs = sorted([d for d in run_dir.glob("fold_*") if d.is_dir()])
+        if not fold_dirs:
+            raise FileNotFoundError(f"Keine fold_* Ordner in {run_dir}")
 
-            "total_cum_return": k_total["cum_return"],
-            "total_maxdd": k_total["maxdd"],
+        for fdir in fold_dirs:
+            m = re.search(r"fold_(\d+)", fdir.name)
+            fold_id = int(m.group(1)) if m else None
 
-            "ex_cum_return": k_ex["cum_return"],
-            "ex_sharpe": k_ex["sharpe"],
-            "ex_sortino": k_ex["sortino"],
-            "ex_cvar_95": k_ex["cvar"],
-            "ex_calmar": k_ex["calmar"],
+            test_root = fdir / "test"
+            if not test_root.is_dir():
+                continue
 
-            "avg_cost_rate": avg_cost,
-            "avg_turnover": avg_to,
-        }
+            for ydir in sorted([d for d in test_root.glob("test_*") if d.is_dir()]):
+                m2 = re.search(r"(\d{4})", ydir.name)
+                test_year = int(m2.group(1)) if m2 else None
 
-        if include_psr:
-            row["psr_ex"] = float(psr(ret_ex, sr_threshold=0.0))
-        else:
-            row["psr_ex"] = float("nan")
+                if not (ydir / "rewards.parquet").is_file():
+                    continue
 
-        if include_dsr:
-            row["dsr_ex"] = float(dsr(ret_ex, n_trials=n_trials_dsr, sr_var_trials=sr_var_trials))
-        else:
-            row["dsr_ex"] = float("nan")
+                ret_total = _load_returns_from_rewards(ydir, log_col="r_log_t")
+                ret_ex = _excess(ret_total)
 
-        rows_path.append(row)
+                k_total = scorecard_eval(ret_total, periods_per_year=periods_per_year, alpha_cvar=alpha_cvar)
+                k_ex = scorecard_eval(ret_ex, periods_per_year=periods_per_year, alpha_cvar=alpha_cvar)
 
-    if rows_year:
-        pd.DataFrame(rows_year).sort_values(["path_id", "year"]).to_csv(rep / "metrics_per_path_year.csv", index=False)
+                avg_cost, avg_to = _load_cost_turnover(ydir)
 
-    if rows_path:
-        pd.DataFrame(rows_path).sort_values("path_id").to_csv(rep / "metrics_per_path.csv", index=False)
+                rows.append({
+                    "run": run_dir.name,
+                    "fold": fold_id,
+                    "test_year": test_year,
+                    "test_dir": ydir.name,
+
+                    "total_cum_return": k_total["cum_return"],
+                    "total_maxdd": k_total["maxdd"],
+
+                    "ex_cum_return": k_ex["cum_return"],
+                    "ex_sharpe": k_ex["sharpe"],
+                    "ex_sortino": k_ex["sortino"],
+                    "ex_cvar_95": k_ex["cvar"],
+                    "ex_calmar": k_ex["calmar"],
+
+                    "avg_cost_rate": avg_cost,
+                    "avg_turnover": avg_to,
+
+                    "psr_ex": float(psr(ret_ex, sr_threshold=0.0)) if include_psr else float("nan"),
+                    "dsr_ex": float(dsr(ret_ex, n_trials=n_trials_dsr, sr_var_trials=sr_var_trials)) if include_dsr else float("nan"),
+                })
+
+        if rows:
+            df = pd.DataFrame(rows)
+            sort_cols = [c for c in ["test_year", "fold"] if c in df.columns]
+            if sort_cols:
+                df = df.sort_values(sort_cols)
+            df.to_csv(rep / "metrics_per_test_year.csv", index=False)
+    else:
+        raise ValueError(f"Unbekannter mode='{mode}'. Erlaubt: paths | wf_year")
 
 
 if __name__ == "__main__":
@@ -198,6 +257,8 @@ if __name__ == "__main__":
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--run_dir", required=True)
+    ap.add_argument("--mode", type=str, default="paths", choices=["paths", "wf_year"],
+                    help="paths: CPCV Path_XX Ordner | wf_year: Walk-Forward fold_XX/test/test_YYYY")
     ap.add_argument("--periods_per_year", type=int, default=252)
     ap.add_argument("--alpha_cvar", type=float, default=0.95)
     ap.add_argument("--riskfree_parquet", type=str, default=None)
@@ -213,6 +274,7 @@ if __name__ == "__main__":
 
     compute_path_metrics(
         args.run_dir,
+        mode=args.mode,
         periods_per_year=args.periods_per_year,
         alpha_cvar=args.alpha_cvar,
         riskfree_parquet=args.riskfree_parquet,
