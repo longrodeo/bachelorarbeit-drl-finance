@@ -1,10 +1,10 @@
 # src/runs/train.py
 from __future__ import annotations
-import argparse, json
+import argparse
 from pathlib import Path
 from datetime import datetime
 import shutil, json
-from functools import partial
+
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.vec_env import SubprocVecEnv
 
@@ -118,9 +118,17 @@ def main():
             "reward": args.reward,
             "state_spec": args.state_spec,
             "strategy": args.strategy,
+            "wf_mode": args.wf_mode,
             "splits": args.splits,
             "seed": args.seed,
             "timesteps": args.total_timesteps,
+            "features_source": args.features_source,
+            "n_envs": args.n_envs,
+            "env_mode": args.env_mode,
+            "eval_mode": args.eval_mode,
+            "hpo_mode": args.hpo_mode,
+            "hpo_param_file": args.hpo_param_file,
+            "hpo_splits": args.hpo_splits,
             "timestamp": ts,
         }
         (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -135,6 +143,12 @@ def main():
         (run_dir / "run_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
         # copy used splits yaml for audit
+        if args.hpo_mode == "grid" and args.hpo_param_file:
+            try:
+                shutil.copyfile(args.hpo_param_file, run_dir / Path(args.hpo_param_file).name)
+            except Exception as e:
+                logger.warning("Konnte hpo_param_file nicht kopieren: %s", e)
+
         try:
             shutil.copyfile(args.splits, run_dir / Path(args.splits).name)
         except Exception as e:
@@ -193,9 +207,10 @@ def main():
                 # Basiskonfig für PPO/SAC holen
                 ppo_kwargs = {k: v for k, v in t.items() if not k.startswith("_")}
                 # Trial-Overrides einmischen (Keys, die mit "_" beginnen, ignorieren)
-                for k, v in t.items():
-                    if not k.startswith("_"):
-                        ppo_kwargs[k] = v
+
+                # Trial-HPs persistent speichern (für Repro / BA-Doku)
+                (trial_dir / "hparams.json").write_text(json.dumps(ppo_kwargs, indent=2), encoding="utf-8")
+                logger.info("Trial %s hparams: %s", trial_tag, ppo_kwargs)
 
                 for k, fold in enumerate(windows, 1):
                     fold_dir = trial_dir / f"fold_{k:02d}"
@@ -241,6 +256,34 @@ def main():
                             )
                         else:
                             model.set_env(train_vec)
+
+                    # Effective HPs aus dem echten SB3-Model dumpen (Proof gegen Defaults)
+                    # learning_rate als Float (Schedule -> Wert)
+                    lr_val = None
+                    if hasattr(model, "lr_schedule") and callable(getattr(model, "lr_schedule")):
+                        lr_val = float(model.lr_schedule(1.0))
+                    elif isinstance(getattr(model, "learning_rate", None), (int, float)):
+                        lr_val = float(model.learning_rate)
+
+                    cr = getattr(model, "clip_range", None)
+                    cr_val = float(cr(1.0)) if callable(cr) else (float(cr) if isinstance(cr, (int, float)) else cr)
+
+                    eff = {
+                        "algo": args.algo,
+                        "trial": trial_tag,
+                        "fold": k,
+                        "learning_rate": lr_val,
+                        "n_steps": getattr(model, "n_steps", None),
+                        "batch_size": getattr(model, "batch_size", None),
+                        "n_epochs": getattr(model, "n_epochs", None),
+                        "gamma": getattr(model, "gamma", None),
+                        "gae_lambda": getattr(model, "gae_lambda", None),
+                        "ent_coef": getattr(model, "ent_coef", None),
+                        "vf_coef": getattr(model, "vf_coef", None),
+                        "max_grad_norm": getattr(model, "max_grad_norm", None),
+                        "clip_range": cr_val,
+                    }
+                    (fold_dir / "effective_hparams.json").write_text(json.dumps(eff, indent=2), encoding="utf-8")
 
                     model.learn(total_timesteps=args.total_timesteps, progress_bar=False, reset_num_timesteps=not (args.strategy == "walkforward" and args.wf_mode == "warm"))
                     logger.info(
