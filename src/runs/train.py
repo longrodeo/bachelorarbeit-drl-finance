@@ -82,6 +82,7 @@ def _load_trials(path):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--strategy", choices=["cpcv", "walkforward"], required=True)
+    p.add_argument("--wf_mode", choices=["refit", "warm"], default="refit")  # nur für walkforward
     p.add_argument("--splits", required=True)
     p.add_argument("--state_spec", required=True)                  # z.B. config/state_config/state0.yml
     p.add_argument("--reward", choices=["log", "icvar", "icvar_dd"], default="log")
@@ -179,28 +180,6 @@ def main():
         else:
             logger.info("HPO-Modus: none (Single-Run)")
 
-        # ---------- WF: Modell einmal vor der Schleife bauen ----------
-        model = None
-        if args.strategy == "walkforward":
-            first_seg = windows[0]["train"][0]
-            init_env = DummyVecEnv(
-                [lambda: build_env_segment(
-                    panel,
-                    first_seg,
-                    state_spec=spec,
-                    reward_kind=args.reward,
-                    with_recorder=False,
-                    out_dir=None,
-                )]
-            )
-            model = make_agent(
-                args.algo,
-                init_env,
-                tensorboard_log=str(run_dir / "tb"),
-                seed=args.seed,
-            )
-            logger.info("Initiales Modell für walkforward gebaut (Algo=%s)", args.algo)
-
         # TRAIN/TEST pro Fold
         for t_id, t in enumerate(trials):
             trial_tag = t.get("_name", f"trial{t_id:03d}")
@@ -208,6 +187,7 @@ def main():
             (trial_dir / "tb").mkdir(parents=True, exist_ok=True)
 
             logger.info("Starte Trial %s (%d/%d)", trial_tag, t_id + 1, len(trials))
+            model = None  # pro Trial neu (wichtig für grid + WF)
 
             try:
                 # Basiskonfig für PPO/SAC holen
@@ -241,7 +221,7 @@ def main():
                         seed_base=args.seed + 1000 * t_id,
                     )
 
-                    if args.strategy == "cpcv":
+                    if args.strategy == "cpcv" or (args.strategy == "walkforward" and args.wf_mode == "refit"):
                         model = make_agent(
                             args.algo,
                             train_vec,
@@ -250,9 +230,19 @@ def main():
                             algo_kwargs=ppo_kwargs,
                         )
                     else:
-                        model.set_env(train_vec)
+                        # walkforward warm-start: Gewichte/Optimizer über Folds behalten
+                        if model is None:
+                            model = make_agent(
+                                args.algo,
+                                train_vec,
+                                tensorboard_log=str(trial_dir / "tb"),
+                                seed=args.seed,
+                                algo_kwargs=ppo_kwargs,
+                            )
+                        else:
+                            model.set_env(train_vec)
 
-                    model.learn(total_timesteps=args.total_timesteps, progress_bar=False)
+                    model.learn(total_timesteps=args.total_timesteps, progress_bar=False, reset_num_timesteps=not (args.strategy == "walkforward" and args.wf_mode == "warm"))
                     logger.info(
                         "Training abgeschlossen: Trial %s, Fold %02d, timesteps=%d",
                         trial_tag,
