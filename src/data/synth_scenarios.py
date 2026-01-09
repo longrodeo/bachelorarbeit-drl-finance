@@ -1,11 +1,15 @@
 # synth_scenarios.py
-# Uses your repo helpers:
-# - set_seed / get_logger  :contentReference[oaicite:2]{index=2}
-# - load_parquet / save_parquet :contentReference[oaicite:3]{index=3}
+# - Deterministic seed + logging (repo helpers)
+# - Parquet IO (repo parquet_io)
+# - Scenario generation via bootstrapped whitened innovations + covariance rescaling
+# - Sanity checks: whitening Cov(Z)~I and recoloring Cov(U_sim)~Sigma_tgt
+# - Beta via OLS regression: log(volume) = a + beta*|return| + eps
+#   and simulation uses volume_multiplier = exp(beta*|return|)
 
 import numpy as np
 import pandas as pd
 from pathlib import Path
+
 
 from src.utils.helpers import set_seed, get_logger
 from src.utils.parquet_io import load_parquet, save_parquet
@@ -14,7 +18,7 @@ from src.utils.parquet_io import load_parquet, save_parquet
 # -----------------------
 # CONFIG
 # -----------------------
-INPUT_PARQUET = Path("data/clean/prices.parquet")   # <-- set your real path
+INPUT_PARQUET = Path("data/interim/panel.parquet")   # <-- adjust
 OUTPUT_DIR = Path("data/synth")
 SEED = 42
 
@@ -26,6 +30,8 @@ CRYPTO = ["BTC-USD", "ETH-USD"]
 N_DAYS = 252
 BLOCK_LEN = 10
 N_CAND = 200
+
+SANITY_RECOLOR_SAMPLE = 5000  # how many historical days to sample for recoloring check
 
 # -----------------------
 # REPRO + LOGGING
@@ -41,7 +47,6 @@ logger.info(f"assets={ASSETS} n_days={N_DAYS} block_len={BLOCK_LEN} n_cand={N_CA
 # -----------------------
 df = load_parquet(INPUT_PARQUET)
 
-# Ensure (date, asset) multiindex
 if not isinstance(df.index, pd.MultiIndex) or list(df.index.names) != ["date", "asset"]:
     if "date" in df.columns and "asset" in df.columns:
         df = df.set_index(["date", "asset"])
@@ -61,19 +66,18 @@ low       = df["low"].unstack("asset")
 close     = df["close"].unstack("asset")
 volume    = df["volume"].unstack("asset")
 
-# common start date where all assets have adj_open+adj_close
 first_valid = []
 for a in ASSETS:
     ok = adj_close[a].notna() & adj_open[a].notna()
     if not ok.any():
         raise ValueError(f"No valid adj_open/adj_close for asset {a}.")
     first_valid.append(adj_close.index[ok].min())
+
 common_start = max(first_valid)
 
 adj_close = adj_close.loc[adj_close.index >= common_start, ASSETS].dropna()
 adj_open  = adj_open.loc[adj_close.index, ASSETS].dropna()
 
-# align others
 high   = high.loc[adj_close.index, ASSETS].ffill()
 low    = low.loc[adj_close.index, ASSETS].ffill()
 close  = close.loc[adj_close.index, ASSETS].ffill()
@@ -86,44 +90,91 @@ logger.info(f"common_start={common_start} history_days={len(adj_close)}")
 # -----------------------
 r = np.log(adj_close / adj_close.shift(1)).dropna()
 dates_r = r.index
-R = r.values  # (T x d)
 
+R = r.to_numpy()  # (T x d)
+
+# overnight gaps: log(adj_open_t / adj_close_{t-1})
 g = np.log(adj_open.loc[dates_r] / adj_close.shift(1).loc[dates_r]).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-G = g.values
+G = g.to_numpy()  # (T x d)
 
+# intraday range factor q = (high-low)/close
 q = ((high.loc[dates_r] - low.loc[dates_r]) / close.loc[dates_r]).replace([np.inf, -np.inf], np.nan)
 q = q.clip(lower=0.0).ffill().fillna(0.0)
-Q = q.values
+Q = q.to_numpy()  # (T x d)
 
+# log-volume
 eps = 1e-8
 lv = np.log(volume.loc[dates_r].clip(lower=eps))
-LV = lv.values
+LV = lv.to_numpy()  # (T x d)
 
-# Whitening for returns
+# -----------------------
+# WHITEN RETURNS
+# -----------------------
 mu_hist = R.mean(axis=0)
 U = R - mu_hist
+
 Sigma = np.cov(U, rowvar=False)
 Sigma = 0.5 * (Sigma + Sigma.T)
 
 L = np.linalg.cholesky(Sigma + 1e-12 * np.eye(Sigma.shape[0]))
-Z = np.linalg.solve(L, U.T).T  # (T x d), approx cov ~ I
+Z = np.linalg.solve(L, U.T).T  # (T x d) approx Cov(Z)=I
 
 std_hist = np.sqrt(np.diag(Sigma))
 C = Sigma / np.outer(std_hist, std_hist)
 np.fill_diagonal(C, 1.0)
 
-# Start level: last observed adj_close
-P0 = adj_close.iloc[-1].values.astype(float)
+# ---- Sanity check 1: Cov(Z) ~ I ----
+CovZ = np.cov(Z, rowvar=False)
+diag_mean = float(np.mean(np.diag(CovZ)))
+offdiag = CovZ - np.diag(np.diag(CovZ))
+offdiag_maxabs = float(np.max(np.abs(offdiag)))
+logger.info(f"sanity_whiten: mean(diag(CovZ))={diag_mean:.4f} max|offdiag(CovZ)|={offdiag_maxabs:.4f}")
 
-# Synthetic date index
+# -----------------------
+# BETA VIA REGRESSION: log(volume) = a + beta*|return| + eps
+# -----------------------
+absR = np.abs(R)
+beta_vec = np.zeros(len(ASSETS), dtype=float)
+BETA_CAP = 15.0  # cap to avoid unrealistic volume explosions
+
+for j, a in enumerate(ASSETS):
+    x = absR[:, j]
+    y = LV[:, j]
+
+    # simple outlier-robustness: clip x at 99% quantile
+    q99 = np.quantile(x, 0.99)
+    x = np.clip(x, 0.0, q99)
+
+    x_mean = x.mean()
+    y_mean = y.mean()
+    denom = np.sum((x - x_mean) ** 2)
+
+    if denom <= 1e-12:
+        beta = 0.0
+    else:
+        beta = float(np.sum((x - x_mean) * (y - y_mean)) / denom)
+
+    beta_vec[j] = float(np.clip(beta, 0.0, BETA_CAP))  # keep it non-negative
+
+logger.info("beta_per_asset (OLS on history): " + ", ".join([f"{a}={beta_vec[i]:.2f}" for i, a in enumerate(ASSETS)]))
+logger.info(f"beta_summary: mean={float(beta_vec.mean()):.2f} median={float(np.median(beta_vec)):.2f} max={float(beta_vec.max()):.2f}")
+logger.info(f"beta_capped_count={int(np.sum(beta_vec >= BETA_CAP - 1e-12))}")
+
+
+# -----------------------
+# START LEVEL + SYN DATES
+# -----------------------
+P0 = adj_close.iloc[-1].to_numpy(dtype=float)
+
 last_dt = adj_close.index[-1]
 tz = getattr(last_dt, "tz", None)
 start_dt = pd.Timestamp(last_dt) + pd.Timedelta(days=1)
 syn_dates = pd.bdate_range(start=start_dt, periods=N_DAYS, tz=tz)
 
 asset_to_idx = {a: i for i, a in enumerate(ASSETS)}
+equity_idx = [asset_to_idx[a] for a in EQUITIES]
 spy_i = asset_to_idx["SPY"]
-spy_vol_base = R[:, spy_i].std(ddof=1) * np.sqrt(252)
+spy_vol_base = float(R[:, spy_i].std(ddof=1) * np.sqrt(252))
 
 # -----------------------
 # SCENARIOS
@@ -133,17 +184,19 @@ scenarios = {
         "k": 2.0, "alpha": 0.50,
         "mu_pa_equity_first": -0.25, "mu_pa_equity_last": -0.05,
         "mu_pa_gold": +0.05,
-        "mu_pa_crypto_first": -0.40, "mu_pa_crypto_last": -0.10,
+        "mu_pa_crypto_first": -0.70, "mu_pa_crypto_last": -0.30,
         "vol_scale": 1.6, "q_scale": 1.25,
-        "target": {"ret_spy": -0.20, "vol_spy": spy_vol_base * 2.0, "mdd_spy": 0.35},
+
+        "target": {"ret_spy": -0.30,"ret_tol": 0.05, "vol_spy": spy_vol_base * 2.0, "mdd_spy": 0.40, "ret_crypto": -0.60,
+                   "ret_crypto_tol": 0.05},
     },
     "side_lowvol_1y": {
-        "k": 0.90, "alpha": 0.00,
+        "k": 0.70, "alpha": 0.00,
         "mu_pa_equity_first": 0.00, "mu_pa_equity_last": 0.00,
         "mu_pa_gold": +0.02,
         "mu_pa_crypto_first": 0.00, "mu_pa_crypto_last": 0.00,
         "vol_scale": 0.95, "q_scale": 0.90,
-        "target": {"ret_spy": 0.00, "vol_spy": spy_vol_base * 0.90, "mdd_spy": 0.10},
+        "target": {"ret_spy": 0.00, "ret_tol": 0.05, "vol_spy": spy_vol_base * 0.90, "mdd_spy": 0.10},
     },
     "side_highvol_1y": {
         "k": 1.80, "alpha": 0.25,
@@ -151,7 +204,7 @@ scenarios = {
         "mu_pa_gold": 0.00,
         "mu_pa_crypto_first": 0.00, "mu_pa_crypto_last": 0.00,
         "vol_scale": 1.4, "q_scale": 1.20,
-        "target": {"ret_spy": 0.00, "vol_spy": spy_vol_base * 1.80, "mdd_spy": 0.25},
+        "target": {"ret_spy": 0.00, "ret_tol": 0.05, "vol_spy": spy_vol_base * 1.80, "mdd_spy": 0.25},
     },
 }
 
@@ -169,16 +222,27 @@ for scen_name, spec in scenarios.items():
     k = float(spec["k"])
     alpha = float(spec["alpha"])
 
+    # build stress correlation
     C_stress = (1.0 - alpha) * C + alpha * np.ones_like(C)
     np.fill_diagonal(C_stress, 1.0)
     C_stress = np.clip(C_stress, -0.95, 0.95)
     np.fill_diagonal(C_stress, 1.0)
 
+    # target covariance
     sigma_tgt = k * std_hist
     Sigma_tgt = np.diag(sigma_tgt) @ C_stress @ np.diag(sigma_tgt)
     Sigma_tgt = 0.5 * (Sigma_tgt + Sigma_tgt.T)
     L_tgt = np.linalg.cholesky(Sigma_tgt + 1e-12 * np.eye(len(ASSETS)))
 
+    # ---- Sanity check 2: recoloring Cov(Z @ L_tgt.T) ~ Sigma_tgt ----
+    n_s = min(SANITY_RECOLOR_SAMPLE, T)
+    idx_s = np.random.randint(0, T, size=n_s)
+    U_sim = Z[idx_s, :] @ L_tgt.T
+    CovU = np.cov(U_sim, rowvar=False)
+    rel_err = float(np.linalg.norm(CovU - Sigma_tgt, ord="fro") / (np.linalg.norm(Sigma_tgt, ord="fro") + 1e-12))
+    logger.info(f"sanity_recolor[{scen_name}]: rel_fro_err={rel_err:.4f}")
+
+    # piecewise drift MU
     n1 = int(round(N_DAYS * 0.80))
     n2 = N_DAYS - n1
 
@@ -195,14 +259,17 @@ for scen_name, spec in scenarios.items():
         mu_pa_first[asset_to_idx[a]] = spec["mu_pa_crypto_first"]
         mu_pa_last[asset_to_idx[a]]  = spec["mu_pa_crypto_last"]
 
-    mu_first = mu_pa_first / 252.0
-    mu_last  = mu_pa_last  / 252.0
-    MU = np.vstack([np.tile(mu_first, (n1, 1)), np.tile(mu_last, (n2, 1))])
+    MU = np.vstack([
+        np.tile(mu_pa_first / 252.0, (n1, 1)),
+        np.tile(mu_pa_last  / 252.0, (n2, 1)),
+    ])
 
     best_score = np.inf
     best_pack = None
+    best_metrics = None
 
     for _ in range(N_CAND):
+        # block bootstrap Z
         idx = []
         while len(idx) < N_DAYS:
             s = np.random.randint(0, max_start + 1)
@@ -212,6 +279,12 @@ for scen_name, spec in scenarios.items():
         Z_star = Z[idx, :]
         R_star = MU + Z_star @ L_tgt.T
 
+        # mean pairwise equity correlation (off-diagonal) from synthetic returns
+        corr = np.corrcoef(R_star[:, equity_idx].T)
+        m = corr.shape[0]
+        equity_corr_mean = float((corr.sum() - m) / (m * (m - 1)))  # average off-diagonal
+
+        # adj_close
         logP = np.log(P0)[None, :] + np.cumsum(R_star, axis=0)
         adj_close_star = np.exp(logP)
 
@@ -251,7 +324,7 @@ for scen_name, spec in scenarios.items():
         high_star = np.maximum.reduce([high_cand, adj_open_star, adj_close_star])
         low_star  = np.minimum.reduce([low_cand, adj_open_star, adj_close_star])
 
-        # volume: log-volume bootstrap + stress scaling + |return| scaling
+        # volume: bootstrap log-volume + stress scaling + regression-based multiplier exp(beta*|return|)
         LV_star = np.empty((N_DAYS, len(ASSETS)))
         for j in range(len(ASSETS)):
             idx_v = []
@@ -261,24 +334,35 @@ for scen_name, spec in scenarios.items():
             idx_v = np.array(idx_v[:N_DAYS])
             LV_star[:, j] = LV[idx_v, j]
 
-        beta = 12.0
-        vol_boost = 1.0 + beta * np.abs(R_star)
-        volume_star = np.exp(LV_star) * float(spec["vol_scale"]) * vol_boost
+        vol_mult = np.exp(np.abs(R_star) * beta_vec[None, :])  # (N_DAYS x d)
+        volume_star = np.exp(LV_star) * float(spec["vol_scale"]) * vol_mult
         volume_star = np.clip(volume_star, 0.0, None)
 
-        # candidate scoring on SPY
+        # metrics for selection (SPY)
         spy_prices = adj_close_star[:, spy_i]
         spy_ret = float(np.exp(R_star[:, spy_i].sum()) - 1.0)
         spy_vol = float(R_star[:, spy_i].std(ddof=1) * np.sqrt(252))
         peak = np.maximum.accumulate(spy_prices)
         mdd = float(np.max(1.0 - spy_prices / peak))
+        spy_daily_std = float(R_star[:, spy_i].std(ddof=1))
+        spy_end_ratio = float(spy_prices[-1] / spy_prices[0] - 1.0)
+
+        # metrics for crypto bear case
+        btc_i = asset_to_idx["BTC-USD"]
+        eth_i = asset_to_idx["ETH-USD"]
+
+        btc_ret = float(np.exp(R_star[:, btc_i].sum()) - 1.0)
+        eth_ret = float(np.exp(R_star[:, eth_i].sum()) - 1.0)
+        crypto_ret = 0.5 * (btc_ret + eth_ret)
 
         tgt = spec["target"]
         score = (
-            ((spy_ret - tgt["ret_spy"]) / max(1e-6, abs(tgt["ret_spy"]) + 0.05)) ** 2
+            ((spy_ret - tgt["ret_spy"]) / max(1e-6, abs(tgt["ret_spy"]) + tgt["ret_tol"])) ** 2
             + ((spy_vol - tgt["vol_spy"]) / max(1e-6, tgt["vol_spy"])) ** 2
             + ((mdd - tgt["mdd_spy"]) / max(1e-6, tgt["mdd_spy"])) ** 2
         )
+        if "ret_crypto" in tgt:
+            score += ((crypto_ret - tgt["ret_crypto"]) / max(1e-6, abs(tgt["ret_crypto"]) + tgt["ret_crypto_tol"])) ** 2
 
         if score < best_score:
             best_score = score
@@ -291,8 +375,19 @@ for scen_name, spec in scenarios.items():
                 "adj_close": adj_close_star,
                 "volume": volume_star,
             }
+            best_metrics = (spy_ret, spy_vol, mdd, equity_corr_mean, spy_daily_std, spy_end_ratio)
+    
+    # log chosen path stats
 
-    # build long format output
+    spy_ret, spy_vol, mdd, eq_corr, spy_dstd, spy_end = best_metrics
+    logger.info(
+        f"{scen_name}: best_score={best_score:.6f} "
+        f"SPY_ret={spy_ret:.3f} SPY_end={spy_end:.3f} "
+        f"SPY_vol={spy_vol:.3f} SPY_dstd={spy_dstd:.4f} "
+        f"SPY_mdd={mdd:.3f} EQ_corr_mean={eq_corr:.3f}"
+    )
+
+    # build long output
     out = []
     for j, a in enumerate(ASSETS):
         tmp = pd.DataFrame(
@@ -317,7 +412,7 @@ for scen_name, spec in scenarios.items():
     out_df = out_df.reset_index().set_index(["date", "asset"]).sort_index()
 
     all_outputs[scen_name] = out_df
-    logger.info(f"{scen_name}: best_score={best_score:.6f} rows={len(out_df)}")
+    logger.info(f"{scen_name}: rows={len(out_df)}")
 
 # -----------------------
 # SAVE
