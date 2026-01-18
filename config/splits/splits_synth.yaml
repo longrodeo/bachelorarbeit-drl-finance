@@ -1,7 +1,7 @@
 scenarios:
   - name: bear_1y
-    file: data/synth/bear_1y.parquet
+    file: data/synth/bear_1y_features.parquet
   - name: side_lowvol_1y
-    file: data/synth/side_lowvol_1y.parquet
+    file: data/synth/side_lowvol_1y_features.parquet
   - name: side_highvol_1y
-    file: data/synth/side_highvol_1y.parquet
+    file: data/synth/side_highvol_1y_features.parquet
