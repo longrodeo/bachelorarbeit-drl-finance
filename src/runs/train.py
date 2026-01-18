@@ -13,7 +13,7 @@ from stable_baselines3.common.vec_env import SubprocVecEnv
 from src.utils.helpers import set_seed, get_logger
 import src.state.state_builder as sb
 from src.env.data_builder import load_data_for_windows, build_env_segment
-from src.data.parquet_io import load_parquet
+from src.utils.parquet_io import load_parquet
 from src.rl.agent_policy import make_agent
 from src.accounting.evaluator import compute_rewards_from_snapshots, RewardSpec, OnlineEvaluator
 from src.utils import paths
