@@ -123,6 +123,88 @@ def join_raw_and_z(df: pd.DataFrame, window: int, clip: float = 6.0, eps: float 
         out = non_num.join(out, how="left")
     return out
 
+def _ensure_synth_schema(prices: pd.DataFrame) -> pd.DataFrame:
+    """Ensure minimal OHLCV schema expected by CLEAN builder for synthetic paths.
+
+    The CLEAN builder expects at least: open, high, low, close, adj_open, adj_close,
+    volume, dividends, stock_splits (MultiIndex: date, asset).
+    Missing columns are filled with conservative defaults.
+    """
+    if not isinstance(prices.index, pd.MultiIndex) or prices.index.names != ["date", "asset"]:
+        raise ValueError("Synthetic prices must be a MultiIndex with index names ['date','asset'].")
+
+    df = prices.copy()
+
+    # Dividends / splits are required by the CLEAN schema but are typically absent in synthetic files.
+    if "dividends" not in df.columns:
+        df["dividends"] = 0.0
+    if "stock_splits" not in df.columns:
+        df["stock_splits"] = 0.0
+
+    # Ensure unadjusted OHLC columns exist (fallback to adjusted where reasonable).
+    if "open" not in df.columns and "adj_open" in df.columns:
+        df["open"] = df["adj_open"]
+    if "close" not in df.columns and "adj_close" in df.columns:
+        df["close"] = df["adj_close"]
+    if "high" not in df.columns and "open" in df.columns and "close" in df.columns:
+        df["high"] = df[["open", "close"]].max(axis=1)
+    if "low" not in df.columns and "open" in df.columns and "close" in df.columns:
+        df["low"] = df[["open", "close"]].min(axis=1)
+
+    # Volume should exist; if missing, set to 0 (features like ADV then become neutral).
+    if "volume" not in df.columns:
+        df["volume"] = 0.0
+
+    return df
+
+
+def attach_constant_risk_free(df: pd.DataFrame, rf_annual: float, day_basis: int = 360) -> pd.DataFrame:
+    """Attach a constant risk-free path (annual rate) to the panel, broadcast over assets."""
+    rf_annual = float(rf_annual)
+    daily_rate = rf_annual / float(day_basis)
+    daily_factor = 1.0 + daily_rate
+    out = df.copy()
+    out["risk_free_rate"] = rf_annual
+    out["rf_daily_rate"] = daily_rate
+    out["rf_daily_factor"] = daily_factor
+    return out
+
+
+def run_synth(synth_dir: Path, window: int, rf_annual: float, day_basis: int) -> None:
+    """Build RAW+Z panels for all synthetic scenario parquet files in ``synth_dir``.
+
+    Input:  MultiIndex (date, asset) OHLCV parquet (e.g., data/synth/bear_1y.parquet).
+    Output: Same directory with suffix ``_features.parquet``.
+    """
+    synth_dir = Path(synth_dir)
+    if not synth_dir.exists():
+        raise FileNotFoundError(f"Synth directory not found: {synth_dir}")
+
+    files = sorted([
+        p for p in synth_dir.glob("*.parquet")
+        if not p.name.endswith("_features.parquet")
+        and not p.name.endswith("_raw_z.parquet")
+        and not p.name.endswith("_clean.parquet")
+    ])
+
+    if not files:
+        print(f"[SYNTH] No parquet files found in {synth_dir}")
+        return
+
+    for p in files:
+        print(f"[SYNTH] {p.name}: CLEAN→RF(const)→RAW+Z")
+        prices = load_parquet(p)
+        prices = _ensure_synth_schema(prices)
+
+        clean = build_clean_data(prices, out_path=None)
+        clean = attach_constant_risk_free(clean, rf_annual=rf_annual, day_basis=day_basis)
+        panel = join_raw_and_z(clean, window=window)
+
+        out = p.with_name(p.stem + "_features.parquet")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        print(f"[WRITE] {out}")
+        save_parquet(panel, out)
+
 
 def run_wf(window: int, out_path: Path, day_basis: int) -> None:
     """Build the walk-forward RAW+Z panel and persist it to ``out_path``."""
@@ -164,8 +246,24 @@ def main() -> None:
     ap.add_argument("--day_basis", type=int, default=360, help="Day-count basis for rf_daily_factor_raw")
     ap.add_argument("--skip_wf", action="store_true", help="Skip building the walk-forward dataset")
     ap.add_argument("--skip_cpcv", action="store_true", help="Skip building CPCV yearly datasets")
+    # Synthetic scenario builder (optional)
+    ap.add_argument("--build_synth", action="store_true",
+                    help="Build synthetic scenario feature panels under --synth_dir")
+    ap.add_argument("--synth_dir", type=str, default="data/synth",
+                    help="Directory containing synthetic scenario parquet files")
+    ap.add_argument("--synth_window", type=int, default=60, help="Rolling-Z window for synthetic panels")
+    ap.add_argument("--rf_annual", type=float, default=0.04,
+                    help="Assumed annual risk-free rate for synthetic scenarios (e.g., 0.04=4%)")
 
     args = ap.parse_args()
+
+    if args.build_synth:
+        run_synth(
+            synth_dir=Path(args.synth_dir),
+            window=args.synth_window,
+            rf_annual=args.rf_annual,
+            day_basis=args.day_basis,
+        )
 
     if not args.skip_wf:
         default_out = Path(paths.CLEAN_PANEL).with_name(Path(paths.CLEAN_PANEL).stem + "_raw_z.parquet")
