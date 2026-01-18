@@ -326,7 +326,7 @@ def main():
             )
 
         # Panel laden
-        load_strategy = args.strategy if args.mode == "standard" else "cpcv"
+        load_strategy = args.strategy if args.mode == "standard" else "walkforward"
         panel = load_data_for_windows(
             windows,
             strategy=load_strategy,
