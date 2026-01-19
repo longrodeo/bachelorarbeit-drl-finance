@@ -1,0 +1,99 @@
+2026-01-08 14:16:41 - synth - INFO - seed=42 input=data\interim\panel.parquet out_dir=data\synth
+2026-01-08 14:16:41 - synth - INFO - assets=['SPY', 'IEUR', 'EWJ', 'IEMG', 'EWC', 'IAU', 'BTC-USD', 'ETH-USD'] n_days=252 block_len=10 n_cand=200
+2026-01-08 14:16:42 - synth - INFO - common_start=2015-08-11 00:00:00+00:00 history_days=2354
+2026-01-08 14:16:42 - synth - INFO - sanity_whiten: mean(diag(CovZ))=1.0000 max|offdiag(CovZ)|=0.0000
+2026-01-08 14:16:42 - synth - INFO - beta_per_asset (OLS on history): SPY=32.40, IEUR=25.50, EWJ=32.57, IEMG=17.66, EWC=26.02, IAU=24.68, BTC-USD=10.78, ETH-USD=0.00
+2026-01-08 14:16:42 - synth - INFO - beta_summary: mean=21.20 median=25.09 max=32.57
+2026-01-08 14:16:42 - synth - INFO - sanity_recolor[bear_1y]: rel_fro_err=0.0521
+2026-01-08 14:16:45 - synth - INFO - bear_1y: best_score=0.003195 SPY_ret=-0.317 SPY_end=-0.323 SPY_vol=0.352 SPY_dstd=0.0222 SPY_mdd=0.404 EQ_corr_mean=0.900
+2026-01-08 14:16:45 - synth - INFO - bear_1y: rows=2016
+2026-01-08 14:16:45 - synth - INFO - sanity_recolor[side_lowvol_1y]: rel_fro_err=0.0660
+2026-01-08 14:16:55 - synth - INFO - side_lowvol_1y: best_score=0.035969 SPY_ret=-0.004 SPY_end=-0.007 SPY_vol=0.137 SPY_dstd=0.0086 SPY_mdd=0.106 EQ_corr_mean=0.747
+2026-01-08 14:16:55 - synth - INFO - side_lowvol_1y: rows=2016
+2026-01-08 14:16:55 - synth - INFO - sanity_recolor[side_highvol_1y]: rel_fro_err=0.0961
+2026-01-08 14:17:07 - synth - INFO - side_highvol_1y: best_score=0.032952 SPY_ret=0.000 SPY_end=0.010 SPY_vol=0.266 SPY_dstd=0.0168 SPY_mdd=0.255 EQ_corr_mean=0.757
+2026-01-08 14:17:07 - synth - INFO - side_highvol_1y: rows=2016
+2026-01-08 14:17:07 - synth - INFO - saved bear_1y -> data\synth\bear_1y.parquet
+2026-01-08 14:17:07 - synth - INFO - saved side_lowvol_1y -> data\synth\side_lowvol_1y.parquet
+2026-01-08 14:17:08 - synth - INFO - saved side_highvol_1y -> data\synth\side_highvol_1y.parquet
+2026-01-08 14:17:08 - synth - INFO - done.
+2026-01-08 16:22:07 - synth - INFO - seed=42 input=data\interim\panel.parquet out_dir=data\synth
+2026-01-08 16:22:07 - synth - INFO - assets=['SPY', 'IEUR', 'EWJ', 'IEMG', 'EWC', 'IAU', 'BTC-USD', 'ETH-USD'] n_days=252 block_len=10 n_cand=200
+2026-01-08 16:22:08 - synth - INFO - common_start=2015-08-11 00:00:00+00:00 history_days=2354
+2026-01-08 16:22:08 - synth - INFO - sanity_whiten: mean(diag(CovZ))=1.0000 max|offdiag(CovZ)|=0.0000
+2026-01-08 16:22:08 - synth - INFO - beta_per_asset (OLS on history): SPY=15.00, IEUR=15.00, EWJ=15.00, IEMG=15.00, EWC=15.00, IAU=15.00, BTC-USD=10.78, ETH-USD=0.00
+2026-01-08 16:22:08 - synth - INFO - beta_summary: mean=12.60 median=15.00 max=15.00
+2026-01-08 16:22:08 - synth - INFO - beta_capped_count=6
+2026-01-08 16:22:08 - synth - INFO - sanity_recolor[bear_1y]: rel_fro_err=0.0521
+2026-01-08 16:22:09 - synth - INFO - bear_1y: best_score=0.003195 SPY_ret=-0.317 SPY_end=-0.323 SPY_vol=0.352 SPY_dstd=0.0222 SPY_mdd=0.404 EQ_corr_mean=0.900
+2026-01-08 16:22:09 - synth - INFO - bear_1y: rows=2016
+2026-01-08 16:22:09 - synth - INFO - sanity_recolor[side_lowvol_1y]: rel_fro_err=0.0660
+2026-01-08 16:22:10 - synth - INFO - side_lowvol_1y: best_score=0.104487 SPY_ret=0.004 SPY_end=-0.006 SPY_vol=0.122 SPY_dstd=0.0077 SPY_mdd=0.119 EQ_corr_mean=0.733
+2026-01-08 16:22:10 - synth - INFO - side_lowvol_1y: rows=2016
+2026-01-08 16:22:10 - synth - INFO - sanity_recolor[side_highvol_1y]: rel_fro_err=0.0961
+2026-01-08 16:22:11 - synth - INFO - side_highvol_1y: best_score=0.032952 SPY_ret=0.000 SPY_end=0.010 SPY_vol=0.266 SPY_dstd=0.0168 SPY_mdd=0.255 EQ_corr_mean=0.757
+2026-01-08 16:22:11 - synth - INFO - side_highvol_1y: rows=2016
+2026-01-08 16:22:11 - synth - INFO - saved bear_1y -> data\synth\bear_1y.parquet
+2026-01-08 16:22:11 - synth - INFO - saved side_lowvol_1y -> data\synth\side_lowvol_1y.parquet
+2026-01-08 16:22:11 - synth - INFO - saved side_highvol_1y -> data\synth\side_highvol_1y.parquet
+2026-01-08 16:22:11 - synth - INFO - done.
+2026-01-08 16:53:56 - synth - INFO - seed=42 input=data\interim\panel.parquet out_dir=data\synth
+2026-01-08 16:53:56 - synth - INFO - assets=['SPY', 'IEUR', 'EWJ', 'IEMG', 'EWC', 'IAU', 'BTC-USD', 'ETH-USD'] n_days=252 block_len=10 n_cand=200
+2026-01-08 16:53:56 - synth - INFO - common_start=2015-08-11 00:00:00+00:00 history_days=2354
+2026-01-08 16:53:56 - synth - INFO - sanity_whiten: mean(diag(CovZ))=1.0000 max|offdiag(CovZ)|=0.0000
+2026-01-08 16:53:56 - synth - INFO - beta_per_asset (OLS on history): SPY=15.00, IEUR=15.00, EWJ=15.00, IEMG=15.00, EWC=15.00, IAU=15.00, BTC-USD=10.78, ETH-USD=0.00
+2026-01-08 16:53:56 - synth - INFO - beta_summary: mean=12.60 median=15.00 max=15.00
+2026-01-08 16:53:56 - synth - INFO - beta_capped_count=6
+2026-01-08 16:53:56 - synth - INFO - sanity_recolor[bear_1y]: rel_fro_err=0.0521
+2026-01-08 16:53:58 - synth - INFO - bear_1y: best_score=0.003195 SPY_ret=-0.317 SPY_end=-0.323 SPY_vol=0.352 SPY_dstd=0.0222 SPY_mdd=0.404 EQ_corr_mean=0.900
+2026-01-08 16:53:58 - synth - INFO - bear_1y: rows=2016
+2026-01-08 16:53:58 - synth - INFO - sanity_recolor[side_lowvol_1y]: rel_fro_err=0.0660
+2026-01-08 16:53:59 - synth - INFO - side_lowvol_1y: best_score=0.104487 SPY_ret=0.004 SPY_end=-0.006 SPY_vol=0.122 SPY_dstd=0.0077 SPY_mdd=0.119 EQ_corr_mean=0.733
+2026-01-08 16:53:59 - synth - INFO - side_lowvol_1y: rows=2016
+2026-01-08 16:53:59 - synth - INFO - sanity_recolor[side_highvol_1y]: rel_fro_err=0.0961
+2026-01-08 16:54:00 - synth - INFO - side_highvol_1y: best_score=0.032952 SPY_ret=0.000 SPY_end=0.010 SPY_vol=0.266 SPY_dstd=0.0168 SPY_mdd=0.255 EQ_corr_mean=0.757
+2026-01-08 16:54:00 - synth - INFO - side_highvol_1y: rows=2016
+2026-01-08 16:54:00 - synth - INFO - saved bear_1y -> data\synth\bear_1y.parquet
+2026-01-08 16:54:00 - synth - INFO - saved side_lowvol_1y -> data\synth\side_lowvol_1y.parquet
+2026-01-08 16:54:00 - synth - INFO - saved side_highvol_1y -> data\synth\side_highvol_1y.parquet
+2026-01-08 16:54:00 - synth - INFO - done.
+2026-01-08 16:55:15 - synth - INFO - seed=42 input=data\interim\panel.parquet out_dir=data\synth
+2026-01-08 16:55:15 - synth - INFO - assets=['SPY', 'IEUR', 'EWJ', 'IEMG', 'EWC', 'IAU', 'BTC-USD', 'ETH-USD'] n_days=252 block_len=10 n_cand=200
+2026-01-08 16:55:15 - synth - INFO - common_start=2015-08-11 00:00:00+00:00 history_days=2354
+2026-01-08 16:55:15 - synth - INFO - sanity_whiten: mean(diag(CovZ))=1.0000 max|offdiag(CovZ)|=0.0000
+2026-01-08 16:55:15 - synth - INFO - beta_per_asset (OLS on history): SPY=15.00, IEUR=15.00, EWJ=15.00, IEMG=15.00, EWC=15.00, IAU=15.00, BTC-USD=10.78, ETH-USD=0.00
+2026-01-08 16:55:15 - synth - INFO - beta_summary: mean=12.60 median=15.00 max=15.00
+2026-01-08 16:55:15 - synth - INFO - beta_capped_count=6
+2026-01-08 16:55:15 - synth - INFO - sanity_recolor[bear_1y]: rel_fro_err=0.0521
+2026-01-08 16:55:18 - synth - INFO - bear_1y: best_score=0.003195 SPY_ret=-0.317 SPY_end=-0.323 SPY_vol=0.352 SPY_dstd=0.0222 SPY_mdd=0.404 EQ_corr_mean=0.900
+2026-01-08 16:55:18 - synth - INFO - bear_1y: rows=2016
+2026-01-08 16:55:18 - synth - INFO - sanity_recolor[side_lowvol_1y]: rel_fro_err=0.0660
+2026-01-08 16:55:19 - synth - INFO - side_lowvol_1y: best_score=0.104487 SPY_ret=0.004 SPY_end=-0.006 SPY_vol=0.122 SPY_dstd=0.0077 SPY_mdd=0.119 EQ_corr_mean=0.733
+2026-01-08 16:55:19 - synth - INFO - side_lowvol_1y: rows=2016
+2026-01-08 16:55:19 - synth - INFO - sanity_recolor[side_highvol_1y]: rel_fro_err=0.0961
+2026-01-08 16:55:20 - synth - INFO - side_highvol_1y: best_score=0.032952 SPY_ret=0.000 SPY_end=0.010 SPY_vol=0.266 SPY_dstd=0.0168 SPY_mdd=0.255 EQ_corr_mean=0.757
+2026-01-08 16:55:20 - synth - INFO - side_highvol_1y: rows=2016
+2026-01-08 16:55:20 - synth - INFO - saved bear_1y -> data\synth\bear_1y.parquet
+2026-01-08 16:55:20 - synth - INFO - saved side_lowvol_1y -> data\synth\side_lowvol_1y.parquet
+2026-01-08 16:55:20 - synth - INFO - saved side_highvol_1y -> data\synth\side_highvol_1y.parquet
+2026-01-08 16:55:20 - synth - INFO - done.
+2026-01-08 16:59:09 - synth - INFO - seed=42 input=data\interim\panel.parquet out_dir=data\synth
+2026-01-08 16:59:09 - synth - INFO - assets=['SPY', 'IEUR', 'EWJ', 'IEMG', 'EWC', 'IAU', 'BTC-USD', 'ETH-USD'] n_days=252 block_len=10 n_cand=200
+2026-01-08 16:59:10 - synth - INFO - common_start=2015-08-11 00:00:00+00:00 history_days=2354
+2026-01-08 16:59:10 - synth - INFO - sanity_whiten: mean(diag(CovZ))=1.0000 max|offdiag(CovZ)|=0.0000
+2026-01-08 16:59:10 - synth - INFO - beta_per_asset (OLS on history): SPY=15.00, IEUR=15.00, EWJ=15.00, IEMG=15.00, EWC=15.00, IAU=15.00, BTC-USD=10.78, ETH-USD=0.00
+2026-01-08 16:59:10 - synth - INFO - beta_summary: mean=12.60 median=15.00 max=15.00
+2026-01-08 16:59:10 - synth - INFO - beta_capped_count=6
+2026-01-08 16:59:10 - synth - INFO - sanity_recolor[bear_1y]: rel_fro_err=0.0521
+2026-01-08 16:59:11 - synth - INFO - bear_1y: best_score=0.027067 SPY_ret=-0.279 SPY_end=-0.289 SPY_vol=0.372 SPY_dstd=0.0234 SPY_mdd=0.452 EQ_corr_mean=0.886
+2026-01-08 16:59:11 - synth - INFO - bear_1y: rows=2016
+2026-01-08 16:59:11 - synth - INFO - sanity_recolor[side_lowvol_1y]: rel_fro_err=0.0660
+2026-01-08 16:59:12 - synth - INFO - side_lowvol_1y: best_score=0.104487 SPY_ret=0.004 SPY_end=-0.006 SPY_vol=0.122 SPY_dstd=0.0077 SPY_mdd=0.119 EQ_corr_mean=0.733
+2026-01-08 16:59:12 - synth - INFO - side_lowvol_1y: rows=2016
+2026-01-08 16:59:12 - synth - INFO - sanity_recolor[side_highvol_1y]: rel_fro_err=0.0961
+2026-01-08 16:59:13 - synth - INFO - side_highvol_1y: best_score=0.032952 SPY_ret=0.000 SPY_end=0.010 SPY_vol=0.266 SPY_dstd=0.0168 SPY_mdd=0.255 EQ_corr_mean=0.757
+2026-01-08 16:59:13 - synth - INFO - side_highvol_1y: rows=2016
+2026-01-08 16:59:13 - synth - INFO - saved bear_1y -> data\synth\bear_1y.parquet
+2026-01-08 16:59:13 - synth - INFO - saved side_lowvol_1y -> data\synth\side_lowvol_1y.parquet
+2026-01-08 16:59:13 - synth - INFO - saved side_highvol_1y -> data\synth\side_highvol_1y.parquet
+2026-01-08 16:59:13 - synth - INFO - done.
