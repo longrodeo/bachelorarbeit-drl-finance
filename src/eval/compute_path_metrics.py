@@ -9,7 +9,7 @@ from src.utils.parquet_io import load_parquet  # zentraler Loader mit Engine-Fal
 from src.eval.metrics import simple_from_log, scorecard_eval, psr, dsr
 
 
-def _load_returns_from_rewards(path_dir: Path, log_col: str = "r_log_t") -> pd.Series:
+def _load_returns_from_rewards(path_dir: Path, log_col: str = "r_log_t", quality_start: pd.Timestamp | None = None, quality_end: pd.Timestamp | None = None) -> pd.Series:
     f = path_dir / "rewards.parquet"
     df = load_parquet(f)
 
@@ -19,15 +19,46 @@ def _load_returns_from_rewards(path_dir: Path, log_col: str = "r_log_t") -> pd.S
         raise ValueError(f"'{log_col}' fehlt in {f}")
 
     df["t"] = pd.to_datetime(df["t"], utc=True)
-    df = df.sort_values("t").drop_duplicates("t", keep="last").set_index("t")
+    df = df.sort_values("t").drop_duplicates("t", keep="last")
+    if quality_start is not None:
+        df = df[df["t"] >= quality_start]
+    if quality_end is not None:
+        df = df[df["t"] < quality_end]
+    df = df.set_index("t")
 
     r_log = df[log_col].astype(float).replace([np.inf, -np.inf], np.nan).dropna()
     r = simple_from_log(r_log)
     r.name = "ret_total"
     return r
 
+def _load_returns_from_portfolio_value(
+    path_dir: Path,
+    pv_col: str = "portfolio_value_t",
+    quality_start: pd.Timestamp | None = None,
+    quality_end: pd.Timestamp | None = None
+) -> pd.Series:
+    f = path_dir / "portfolio_snapshots.parquet"
+    df = load_parquet(f)
 
-def _load_cost_turnover(path_dir: Path) -> tuple[float, float]:
+    if "t" not in df.columns:
+        raise ValueError(f"'t' fehlt in {f}")
+    if pv_col not in df.columns:
+        raise ValueError(f"'{pv_col}' fehlt in {f}")
+
+    df["t"] = pd.to_datetime(df["t"], utc=True)
+    df = df.sort_values("t").drop_duplicates("t", keep="last")
+    if quality_start is not None:
+        df = df[df["t"] >= quality_start]
+    if quality_end is not None:
+        df = df[df["t"] < quality_end]
+    df = df.set_index("t")
+
+    pv = df[pv_col].astype(float).replace([np.inf, -np.inf], np.nan).dropna()
+    r = pv.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
+    r.name = "ret_total"
+    return r
+
+def _load_cost_turnover(path_dir: Path, quality_start: pd.Timestamp | None = None, quality_end: pd.Timestamp | None = None) -> tuple[float, float]:
     # optionales Reporting; falls Dateien/Spalten fehlen -> NaN
     ps_f = path_dir / "portfolio_snapshots.parquet"
     if not ps_f.is_file():
@@ -39,7 +70,12 @@ def _load_cost_turnover(path_dir: Path) -> tuple[float, float]:
         return (float("nan"), float("nan"))
 
     ps["t"] = pd.to_datetime(ps["t"], utc=True)
-    ps = ps.sort_values("t").set_index("t")
+    ps = ps.sort_values("t")
+    if quality_start is not None:
+        ps = ps[ps["t"] >= quality_start]
+    if quality_end is not None:
+        ps = ps[ps["t"] < quality_end]
+    ps = ps.set_index("t")
 
     pv = ps["portfolio_value_t"].astype(float)
     fees = ps["fees_total_round"].astype(float).fillna(0.0)
@@ -57,6 +93,10 @@ def _load_cost_turnover(path_dir: Path) -> tuple[float, float]:
         return (avg_cost, float("nan"))
 
     ev["t"] = pd.to_datetime(ev["t"], utc=True)
+    if quality_start is not None:
+        ev = ev[ev["t"] >= quality_start]
+    if quality_end is not None:
+        ev = ev[ev["t"] < quality_end]
     notional_t = ev.groupby("t")["notional_abs"].sum().astype(float)
 
     turnover = (notional_t / prev_pv).replace([np.inf, -np.inf], np.nan).dropna()
@@ -106,6 +146,9 @@ def compute_path_metrics(
     alpha_cvar: float = 0.95,
     riskfree_parquet: str | None = None,
     riskfree_col: str,
+    riskfree_annual: float | None = None,
+    quality_start: str | None = None,
+    quality_end: str | None = None,
     include_psr: bool = False,
     include_dsr: bool = False,
     n_trials_dsr: int = 1,
@@ -118,12 +161,22 @@ def compute_path_metrics(
     mode = (mode or "paths").strip().lower()
     rf = _load_riskfree_series(riskfree_parquet, riskfree_col=riskfree_col)
 
+    q_start = pd.to_datetime(quality_start, utc=True) if quality_start else None
+    q_end = pd.to_datetime(quality_end, utc=True) if quality_end else None
+
     def _excess(ret_total: pd.Series) -> pd.Series:
-        if rf is None:
-            out = ret_total.copy()
-        else:
+        if rf is not None:
             rf_a = rf.reindex(ret_total.index).fillna(0.0)
             out = (1.0 + ret_total).div(1.0 + rf_a) - 1.0
+
+        elif riskfree_annual is not None:
+            # annual -> per period (daily) via compounding
+            rf_daily = (1.0 + float(riskfree_annual)) ** (1.0 / periods_per_year) - 1.0
+            out = (1.0 + ret_total) / (1.0 + rf_daily) - 1.0
+
+        else:
+            out = ret_total.copy()
+
         out.name = "ret_ex"
         return out
 
@@ -139,7 +192,12 @@ def compute_path_metrics(
             m = re.search(r"Path_(\d+)", pdir.name)
             pid = int(m.group(1)) if m else int(len(rows_path) + 1)
 
-            ret_total = _load_returns_from_rewards(pdir, log_col="r_log_t")
+            ret_total = _load_returns_from_rewards(pdir, log_col="r_log_t", quality_start=q_start,
+                                                           quality_end=q_end)
+
+            if ret_total.empty:
+                continue
+
             ret_ex = _excess(ret_total)
 
             # pro Jahr (excess)
@@ -163,7 +221,7 @@ def compute_path_metrics(
             k_total = scorecard_eval(ret_total, periods_per_year=periods_per_year, alpha_cvar=alpha_cvar)
             k_ex = scorecard_eval(ret_ex, periods_per_year=periods_per_year, alpha_cvar=alpha_cvar)
 
-            avg_cost, avg_to = _load_cost_turnover(pdir)
+            avg_cost, avg_to = _load_cost_turnover(pdir, quality_start=q_start, quality_end=q_end)
             row = {
                 "run": run_dir.name,
                 "path_id": pid,
@@ -212,13 +270,14 @@ def compute_path_metrics(
                 if not (ydir / "rewards.parquet").is_file():
                     continue
 
-                ret_total = _load_returns_from_rewards(ydir, log_col="r_log_t")
+                ret_total = _load_returns_from_rewards(ydir, log_col="r_log_t", quality_start=q_start,
+                                                                        quality_end=q_end)
                 ret_ex = _excess(ret_total)
 
                 k_total = scorecard_eval(ret_total, periods_per_year=periods_per_year, alpha_cvar=alpha_cvar)
                 k_ex = scorecard_eval(ret_ex, periods_per_year=periods_per_year, alpha_cvar=alpha_cvar)
 
-                avg_cost, avg_to = _load_cost_turnover(ydir)
+                avg_cost, avg_to = _load_cost_turnover(ydir, quality_start=q_start, quality_end=q_end)
 
                 rows.append({
                     "run": run_dir.name,
@@ -248,6 +307,172 @@ def compute_path_metrics(
             if sort_cols:
                 df = df.sort_values(sort_cols)
             df.to_csv(rep / "metrics_per_test_year.csv", index=False)
+
+
+    elif mode in {"wf_synth", "synth", "scenario", "wf_scenario"}:
+
+        rows: list[dict] = []
+
+        fold_dirs = sorted([d for d in run_dir.glob("fold_*") if d.is_dir()])
+
+        def _eval_sdir(sdir: Path, fold_id: int | None, scenario: str) -> None:
+
+            # Agent (rewards) ODER Benchmark (portfolio_snapshots)
+
+            if (sdir / "rewards.parquet").is_file():
+
+                ret_total = _load_returns_from_rewards(
+
+                    sdir, log_col="r_log_t", quality_start=q_start, quality_end=q_end
+
+                )
+
+            elif (sdir / "portfolio_snapshots.parquet").is_file():
+
+                ret_total = _load_returns_from_portfolio_value(
+
+                    sdir, quality_start=q_start, quality_end=q_end
+
+                )
+
+            else:
+
+                return
+
+            if ret_total.empty:
+                return
+
+            ret_ex = _excess(ret_total)
+
+            k_total = scorecard_eval(ret_total, periods_per_year=periods_per_year, alpha_cvar=alpha_cvar)
+
+            k_ex = scorecard_eval(ret_ex, periods_per_year=periods_per_year, alpha_cvar=alpha_cvar)
+
+            avg_cost, avg_to = _load_cost_turnover(sdir, quality_start=q_start, quality_end=q_end)
+
+            rows.append({
+
+                "run": run_dir.name,
+
+                "fold": fold_id if fold_id is not None else 0,
+
+                "scenario": scenario,
+
+                "test_dir": scenario,
+
+                "total_cum_return": k_total["cum_return"],
+
+                "total_maxdd": k_total["maxdd"],
+
+                "ex_cum_return": k_ex["cum_return"],
+
+                "ex_sharpe": k_ex["sharpe"],
+
+                "ex_sortino": k_ex["sortino"],
+
+                "ex_cvar_95": k_ex["cvar"],
+
+                "ex_calmar": k_ex["calmar"],
+
+                "avg_cost_rate": avg_cost,
+
+                "avg_turnover": avg_to,
+
+                "psr_ex": float(psr(ret_ex, sr_threshold=0.0)) if include_psr else float("nan"),
+
+                "dsr_ex": float(
+                    dsr(ret_ex, n_trials=n_trials_dsr, sr_var_trials=sr_var_trials)) if include_dsr else float("nan"),
+
+            })
+
+        if fold_dirs:
+
+            # original: fold_*/test_synth/<scenario>
+
+            for fdir in fold_dirs:
+
+                m = re.search(r"fold_(\d+)", fdir.name)
+
+                fold_id = int(m.group(1)) if m else None
+
+                test_root = fdir / "test_synth"
+
+                if not test_root.is_dir():
+                    test_root = fdir / "test"
+
+                if not test_root.is_dir():
+                    continue
+
+                for sdir in sorted([d for d in test_root.iterdir() if d.is_dir()]):
+                    _eval_sdir(sdir, fold_id, sdir.name)
+
+        else:
+
+            # NEU: run_dir enthält direkt Szenario-Ordner (z.B. bear_1y/, side_lowvol_1y/, ...)
+
+            scenario_dirs = sorted([d for d in run_dir.iterdir() if d.is_dir() and d.name != "_report"])
+
+            for sdir in scenario_dirs:
+                _eval_sdir(sdir, 0, sdir.name)
+
+        if rows:
+            df = pd.DataFrame(rows).sort_values(["scenario", "fold"])
+
+            df.to_csv(rep / "metrics_per_scenario.csv", index=False)
+
+
+    elif mode in {"benchmark_year", "benchmark"}:
+        rows: list[dict] = []
+
+        ydirs = sorted([d for d in run_dir.glob("benchmark_*") if d.is_dir()])
+        if not ydirs:
+            raise FileNotFoundError(f"Keine benchmark_* Ordner in {run_dir}")
+
+        for ydir in ydirs:
+            m = re.search(r"(\d{4})", ydir.name)
+            test_year = int(m.group(1)) if m else None
+
+            if not (ydir / "portfolio_snapshots.parquet").is_file():
+                continue
+
+            ret_total = _load_returns_from_portfolio_value(ydir, quality_start=q_start, quality_end=q_end)
+            if ret_total.empty:
+                continue
+
+            ret_ex = _excess(ret_total)
+
+            k_total = scorecard_eval(ret_total, periods_per_year=periods_per_year, alpha_cvar=alpha_cvar)
+            k_ex = scorecard_eval(ret_ex, periods_per_year=periods_per_year, alpha_cvar=alpha_cvar)
+
+            avg_cost, avg_to = _load_cost_turnover(ydir, quality_start=q_start, quality_end=q_end)
+
+            rows.append({
+                "run": run_dir.name,
+                "fold": 0,
+                "test_year": test_year,
+                "test_dir": ydir.name,
+
+                "total_cum_return": k_total["cum_return"],
+                "total_maxdd": k_total["maxdd"],
+
+                "ex_cum_return": k_ex["cum_return"],
+                "ex_sharpe": k_ex["sharpe"],
+                "ex_sortino": k_ex["sortino"],
+                "ex_cvar_95": k_ex["cvar"],
+                "ex_calmar": k_ex["calmar"],
+
+                "avg_cost_rate": avg_cost,
+                "avg_turnover": avg_to,
+
+                "psr_ex": float(psr(ret_ex, sr_threshold=0.0)) if include_psr else float("nan"),
+                "dsr_ex": float(dsr(ret_ex, n_trials=n_trials_dsr, sr_var_trials=sr_var_trials)) if include_dsr else float("nan"),
+            })
+
+        if rows:
+            df = pd.DataFrame(rows).sort_values(["test_year"])
+            df.to_csv(rep / "metrics_per_test_year.csv", index=False)
+
+
     else:
         raise ValueError(f"Unbekannter mode='{mode}'. Erlaubt: paths | wf_year")
 
@@ -257,8 +482,8 @@ if __name__ == "__main__":
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--run_dir", required=True)
-    ap.add_argument("--mode", type=str, default="paths", choices=["paths", "wf_year"],
-                    help="paths: CPCV Path_XX Ordner | wf_year: Walk-Forward fold_XX/test/test_YYYY")
+    ap.add_argument("--mode", type=str, default="paths", choices=["paths", "wf_year", "wf_synth", "benchmark_year"],
+                    help="paths: CPCV Path_XX Ordner | wf_year: Walk-Forward fold_XX/test/test_YYYY | wf_synth: fold_XX/test_synth/<scenario>")
     ap.add_argument("--periods_per_year", type=int, default=252)
     ap.add_argument("--alpha_cvar", type=float, default=0.95)
     ap.add_argument("--riskfree_parquet", type=str, default=None)
@@ -269,6 +494,12 @@ if __name__ == "__main__":
     ap.add_argument("--include_dsr", action="store_true")
     ap.add_argument("--n_trials_dsr", type=int, default=1)
     ap.add_argument("--sr_var_trials", type=float, default=None)
+    ap.add_argument("--quality_start", type=str, default=None,
+                    help = "ISO Datum, z.B. 2018-01-01. Filtert Rewards/Costs/Turnover (inklusive).")
+    ap.add_argument("--quality_end", type=str, default=None,
+                    help = "ISO Datum, z.B. 2021-01-01. Filtert Rewards/Costs/Turnover (exklusiv).")
+    ap.add_argument("--riskfree_annual", type=float, default=None,
+                    help="Konstanter risikofreier Jahreszins (z.B. 0.04). Wird genutzt, wenn kein --riskfree_parquet gesetzt ist.")
 
     args = ap.parse_args()
 
@@ -279,6 +510,9 @@ if __name__ == "__main__":
         alpha_cvar=args.alpha_cvar,
         riskfree_parquet=args.riskfree_parquet,
         riskfree_col=args.riskfree_col,
+        riskfree_annual=args.riskfree_annual,
+        quality_start=args.quality_start,
+        quality_end=args.quality_end,
         include_psr=args.include_psr,
         include_dsr=args.include_dsr,
         n_trials_dsr=args.n_trials_dsr,
